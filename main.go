@@ -16,13 +16,14 @@ import (
 var webFS embed.FS
 
 type Character struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Emoji   string   `json:"emoji"`
-	Blurb   string   `json:"blurb"`
-	Persona string   `json:"persona"`
-	Model   string   `json:"model"`
-	Tools   []string `json:"tools"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Emoji    string   `json:"emoji"`
+	Blurb    string   `json:"blurb"`
+	Persona  string   `json:"persona"`
+	Provider string   `json:"provider"`
+	Model    string   `json:"model"`
+	Tools    []string `json:"tools"`
 }
 
 type chatMsg struct {
@@ -112,9 +113,16 @@ func main() {
 				return
 			}
 		}
-		if err := runChat(r.Context(), c, req.SessionID, req.Messages, send); err != nil && r.Context().Err() == nil {
-			log.Printf("chat %s: %v", c.ID, err)
-			send(event{Type: "error", Message: err.Error()})
+		if c.Provider == "claude" {
+			if err := runClaude(r.Context(), c, req.SessionID, req.Messages, send); err != nil && r.Context().Err() == nil {
+				log.Printf("chat %s: %v", c.ID, err)
+				send(event{Type: "error", Message: err.Error()})
+			}
+		} else {
+			if err := runChat(r.Context(), c, req.SessionID, req.Messages, send); err != nil && r.Context().Err() == nil {
+				log.Printf("chat %s: %v", c.ID, err)
+				send(event{Type: "error", Message: err.Error()})
+			}
 		}
 	})
 

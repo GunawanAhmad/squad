@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 
@@ -113,4 +116,83 @@ func runChat(ctx context.Context, c Character, sessionID string, history []chatM
 	}
 	send(event{Type: "text", Delta: "\n\n(stopped: too many tool steps)"})
 	return nil
+}
+
+func transcript(history []chatMsg) string {
+	if len(history) == 1 {
+		return history[0].Content
+	}
+
+	var b strings.Builder
+	b.WriteString("Conversation so far:\n\n")
+
+	for _, m := range history[:len(history)-1] {
+		role := "User"
+		if m.Role == "assistant" {
+			role = "You"
+		}
+		fmt.Fprintf(&b, "%s: %s\n\n", role, m.Content)
+	}
+
+	b.WriteString("Reply to the user's latest message:\n\n")
+	b.WriteString(history[len(history)-1].Content)
+
+	return b.String()
+}
+
+func runClaude(ctx context.Context, c Character, sessionID string, history []chatMsg, send func(event)) error {
+	cmd := exec.CommandContext(ctx, "claude", "-p",
+		"--output-format", "stream-json", "--verbose", "--include-partial-messages",
+		"--system-prompt", c.Persona, // replaces Claude Code's own prompt
+		"--model", c.Model,
+		"--tools", "WebSearch,WebFetch", // nothing else: no shell, no file access
+		"--allowedTools", "WebSearch,WebFetch", // no permission prompts in -p mode
+		"--setting-sources", "project", // skip your ~/.claude hooks and plugins
+		"--strict-mcp-config", // skip your MCP servers
+		"--no-session-persistence",
+	)
+	tmpDir := os.TempDir()
+	cmd.Dir = tmpDir
+	cmd.Env = []string{}
+	cmd.Stdin = strings.NewReader(transcript(history))
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	sc := bufio.NewScanner(out)
+	if sc.Err() != nil {
+		return sc.Err()
+	}
+
+	sc.Buffer(nil, 10<<20) // tool results can be long lines
+	for sc.Scan() {
+		var line struct {
+			Type  string `json:"type"`
+			Event struct {
+				Type  string `json:"type"`
+				Delta struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"delta"`
+			} `json:"event"`
+			IsError bool   `json:"is_error"`
+			Result  string `json:"result"`
+		}
+		if json.Unmarshal(sc.Bytes(), &line) != nil {
+			continue // skip anything that isn't a JSON line
+		}
+
+		switch {
+		case line.Type == "stream_event" && line.Event.Delta.Type == "text_delta":
+			send(event{Type: "text", Delta: line.Event.Delta.Text})
+		case line.Type == "result" && line.IsError:
+			send(event{Type: "error", Message: line.Result})
+		}
+	}
+	return cmd.Wait()
 }
