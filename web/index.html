@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Characters</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
   <style>
     :root {
       --bg: #f6f5f2;
@@ -15,6 +17,7 @@
       --user: #3a5ccc;
       --user-text: #fff;
       --bot: #efede8;
+      --code-bg: #f8f7f4;
     }
 
     @media (prefers-color-scheme: dark) {
@@ -26,6 +29,7 @@
         --border: #2c2c31;
         --accent: #7d9bff;
         --bot: #26262b;
+        --code-bg: #17171a;
       }
     }
 
@@ -143,7 +147,32 @@
       overflow-wrap: anywhere;
     }
 
-    .msg .text { white-space: pre-wrap; }
+    .msg.user .text { white-space: pre-wrap; }
+
+    .msg .text > :first-child { margin-top: 0; }
+    .msg .text > :last-child { margin-bottom: 0; }
+    .msg .text :is(p, ul, ol, pre, blockquote) { margin: .5em 0; }
+    .msg .text :is(ul, ol) { padding-left: 1.4em; }
+    .msg .text code {
+      padding: .1em .35em;
+      border-radius: 4px;
+      background: var(--code-bg);
+      font-size: .9em;
+    }
+
+    .msg .text pre {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    .msg .text pre code.hljs,
+    .msg .text pre code {
+      display: block;
+      padding: 10px 12px;
+      background: var(--code-bg);
+      white-space: pre;
+    }
 
     .msg.user {
       align-self: flex-end;
@@ -238,8 +267,17 @@
       textarea { font-size: 16px; } /* prevents iOS zoom on focus */
     }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script>
-    const URL_RE = /https?:\/\/[^\s)\]>"']+/g;
+    marked.use({ breaks: true });
+    DOMPurify.addHook('afterSanitizeAttributes', (n) => {
+      if (n.tagName === 'A') {
+        n.target = '_blank';
+        n.rel = 'noopener noreferrer';
+      }
+    });
 
     function app() {
       return {
@@ -282,19 +320,11 @@
           this.save();
         },
 
-        // Text with clickable URLs, built from DOM nodes (never innerHTML).
-        linkify(el, text) {
-          el.replaceChildren();
-          let last = 0;
-          for (const m of text.matchAll(URL_RE)) {
-            const a = document.createElement('a');
-            a.href = a.textContent = m[0].replace(/[.,;:]+$/, '');
-            a.target = '_blank';
-            a.rel = 'noopener noreferrer';
-            el.append(text.slice(last, m.index), a);
-            last = m.index + a.textContent.length;
-          }
-          el.append(text.slice(last));
+        // Assistant replies are Markdown; sanitized because they can quote fetched web pages.
+        show(el, m) {
+          if (m.role !== 'assistant') return (el.textContent = this.body(m));
+          el.innerHTML = DOMPurify.sanitize(marked.parse(this.body(m)));
+          el.querySelectorAll('pre code').forEach((c) => hljs.highlightElement(c));
         },
 
         body(m) {
@@ -411,7 +441,7 @@
           <template x-for="t in m.tools ?? []">
             <span class="tool" x-text="toolLabel(t)"></span>
           </template>
-          <span class="text" x-effect="linkify($el, body(m))"></span>
+          <div class="text" x-effect="show($el, m)"></div>
         </div>
       </template>
     </div>

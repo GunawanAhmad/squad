@@ -41,6 +41,7 @@ func runChat(ctx context.Context, c Character, sessionID string, history []chatM
 			msgs = append(msgs, openai.AssistantMessage(m.Content))
 		}
 	}
+
 	params := openai.ChatCompletionNewParams{Model: c.Model, Messages: msgs}
 	for _, t := range c.Tools {
 		params.Tools = append(params.Tools, openai.ChatCompletionFunctionTool(toolSpecs[t]))
@@ -60,13 +61,16 @@ func runChat(ctx context.Context, c Character, sessionID string, history []chatM
 
 				return errors.New("model stream sent an inconsistent chunk")
 			}
+
 			if len(chunk.Choices) == 0 {
 				continue
 			}
+
 			d := chunk.Choices[0].Delta
 			if d.Content != "" {
 				send(event{Type: "text", Delta: d.Content})
 			}
+
 			// Reasoning models stream their thinking here; hidden from UI but sent back during tool loops.
 			if f, ok := d.JSON.ExtraFields["reasoning_content"]; ok {
 				var s string
@@ -75,6 +79,7 @@ func runChat(ctx context.Context, c Character, sessionID string, history []chatM
 				}
 			}
 		}
+
 		err := stream.Err()
 		if err != nil {
 			return nil
@@ -93,10 +98,13 @@ func runChat(ctx context.Context, c Character, sessionID string, history []chatM
 		if len(msg.ToolCalls) == 0 {
 			return nil
 		}
+
 		asst := msg.ToAssistantMessageParam()
+
 		if reasoning.Len() > 0 {
 			asst.SetExtraFields(map[string]any{"reasoning_content": reasoning.String()})
 		}
+
 		params.Messages = append(params.Messages, openai.ChatCompletionMessageParamUnion{OfAssistant: &asst})
 		for _, tc := range msg.ToolCalls {
 			send(event{Type: "tool", Name: tc.Function.Name, Args: tc.Function.Arguments})

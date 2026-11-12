@@ -155,7 +155,14 @@ func loadDotEnv(path string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+
+	defer func() {
+		err := f.Close()
+		if err != nil {
+			return
+		}
+	}()
+
 	s := bufio.NewScanner(f)
 	if s.Err() != nil {
 		return
@@ -168,7 +175,10 @@ func loadDotEnv(path string) {
 		}
 		k = strings.TrimSpace(k)
 		if os.Getenv(k) == "" {
-			os.Setenv(k, strings.Trim(strings.TrimSpace(v), `"'`))
+			err = os.Setenv(k, strings.Trim(strings.TrimSpace(v), `"'`))
+			if err != nil {
+				return
+			}
 		}
 	}
 }
