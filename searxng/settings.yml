@@ -1,0 +1,10 @@
+use_default_settings: true
+
+server:
+  secret_key: "ab60ab1f988426b5e9534af812a2025c11610765c114ff45ae53feb5619c5ff4"
+  limiter: false # only reachable from this machine, no bot protection needed
+
+search:
+  formats:
+    - html
+    - json # the app calls /search?format=json
