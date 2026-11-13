@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
-import { play, speak } from '../audio';
+import { play } from '../audio';
 import CharacterPortrait from './CharacterPortrait.vue';
 import type { Character } from '../types';
 
@@ -29,9 +29,7 @@ async function confirm() {
   play('lock');
   let done = false;
   finish = () => { if (!done) { done = true; emit('pick', c); } };
-  const minShow = new Promise((r) => setTimeout(r, 900));
-  const maxWait = new Promise((r) => setTimeout(r, 5000)); // SpeechSynthesis onend is not always reliable
-  await Promise.all([minShow, Promise.race([speak(c, c.ui.selectLine), maxWait])]);
+  await new Promise((r) => setTimeout(r, 900));
   finish();
 }
 

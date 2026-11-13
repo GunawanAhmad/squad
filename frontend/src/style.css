@@ -20,7 +20,11 @@
   color-scheme: dark;
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--accent) 55%, transparent) transparent;
+}
 
 html, body {
   margin: 0;
@@ -54,6 +58,9 @@ body::after {
   z-index: 100;
   background: repeating-linear-gradient(transparent 0 2px, rgba(0, 0, 0, .18) 2px 3px);
 }
+
+/* Scanlines hurt readability over chat text. */
+body:has(.chat-screen)::after { display: none; }
 
 @keyframes drift {
   to { background-position: 180px -360px, -260px -520px, 120px -240px; }
@@ -571,19 +578,6 @@ header h2 {
   border-top: 1px solid var(--border);
 }
 
-.read-aloud {
-  position: absolute;
-  right: -34px;
-  bottom: 2px;
-  padding: 2px 4px;
-  border: 0;
-  background: none;
-  opacity: .35;
-  cursor: pointer;
-}
-
-.read-aloud:hover, .read-aloud:focus-visible { opacity: 1; }
-
 .tool {
   display: block;
   margin-bottom: 4px;
@@ -607,16 +601,23 @@ form {
 textarea {
   flex: 1;
   max-height: 160px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: rgba(0, 0, 0, .35);
+  padding: 10px 14px;
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, var(--border));
+  background: rgba(0, 0, 0, .45);
   color: var(--text);
   font: inherit;
   resize: none;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  transition: border-color .12s, box-shadow .12s;
 }
 
-textarea:focus { outline: 1px solid var(--accent); }
+textarea::placeholder { color: var(--muted); }
+
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 14px color-mix(in oklab, var(--accent) 25%, transparent);
+}
 
 form .game-btn { padding: 0 20px; }
 
@@ -677,7 +678,6 @@ form .game-btn { padding: 0 20px; }
   header h2 { display: none; } /* the bust's nameplate already shows it */
   header .game-select { margin-left: auto; }
   main { border-left: 0; border-top: 2px solid color-mix(in oklab, var(--accent) 50%, transparent); }
-  .read-aloud { position: static; float: right; }
   textarea { font-size: 16px; } /* prevents iOS zoom on focus */
 }
 

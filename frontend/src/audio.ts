@@ -1,12 +1,10 @@
 import { reactive, watch } from 'vue';
-import type { Character } from './types';
 
 export const settings = reactive({ muted: false, volume: 0.6 });
 try { Object.assign(settings, JSON.parse(localStorage.getItem('audio') ?? '{}')); } catch {}
 watch(settings, () => {
   try { localStorage.setItem('audio', JSON.stringify(settings)); } catch {}
   if (out) out.gain.value = settings.muted ? 0 : settings.volume;
-  if (settings.muted) stopSpeaking();
 });
 
 type Sfx = 'tick' | 'lock' | 'back' | 'arrive';
@@ -63,20 +61,3 @@ export function blip(freq: number) {
   lastBlip = performance.now();
   tone(freq * (0.94 + Math.random() * 0.12), freq, 0.045, 'square', 0.06);
 }
-
-// The only place character voices come from. To swap in ElevenLabs or recorded files, change this body
-// (e.g. play `/characters/${c.id}/voice.mp3`); callers just await it.
-export function speak(c: Character, text: string): Promise<void> {
-  if (settings.muted || !('speechSynthesis' in window)) return Promise.resolve();
-  speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.pitch = c.ui.voice.pitch;
-  u.rate = c.ui.voice.rate;
-  u.volume = settings.volume;
-  return new Promise((resolve) => {
-    u.onend = u.onerror = () => resolve();
-    speechSynthesis.speak(u);
-  });
-}
-
-export const stopSpeaking = () => window.speechSynthesis?.cancel();

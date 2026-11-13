@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { blip, play, stopSpeaking } from '../audio';
+import { blip, play } from '../audio';
 import ChatMessage from './ChatMessage.vue';
 import CharacterPortrait from './CharacterPortrait.vue';
 import GameButton from './GameButton.vue';
@@ -38,7 +38,6 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onKey);
   controller?.abort(); // leaving mid-reply cancels it, like switching characters used to
-  stopSpeaking();
 });
 
 function back() {
@@ -72,7 +71,7 @@ function resize() {
   const el = inputEl.value;
   if (!el) return;
   el.style.height = '';
-  el.style.height = el.scrollHeight + 'px';
+  el.style.height = el.scrollHeight + el.offsetHeight - el.clientHeight + 'px'; // include borders, or it overflows and shows a scrollbar
 }
 
 function onEnter(e: KeyboardEvent) {
