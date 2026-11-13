@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUpdated, ref } from 'vue';
+import { speak } from '../audio';
 import { highlight, renderMarkdown } from '../markdown';
-import type { Message, ToolCall } from '../types';
+import type { Character, Message, ToolCall } from '../types';
 
-const props = defineProps<{ message: Message }>();
+const props = defineProps<{ message: Message; character: Character }>();
 const root = ref<HTMLElement | null>(null);
 
 const text = computed(() => {
@@ -14,6 +15,13 @@ const html = computed(() => (props.message.role === 'assistant' ? renderMarkdown
 
 onMounted(() => highlight(root.value));
 onUpdated(() => highlight(root.value));
+
+// Spoken text: the rendered reply minus KaTeX's hidden MathML copy, so formulas aren't read twice.
+function readAloud() {
+  const t = root.value?.querySelector('.text')?.cloneNode(true) as HTMLElement | undefined;
+  t?.querySelectorAll('.katex-mathml').forEach((e) => e.remove());
+  speak(props.character, t?.textContent ?? '');
+}
 
 function toolLabel(t: ToolCall) {
   let a: { query?: string; url?: string } = {};
@@ -48,5 +56,14 @@ function toolLabel(t: ToolCall) {
       class="text"
       v-text="text"
     />
+    <button
+      v-if="html !== null && message.content"
+      class="read-aloud"
+      title="Read aloud"
+      aria-label="Read aloud"
+      @click="readAloud"
+    >
+      🔊
+    </button>
   </div>
 </template>

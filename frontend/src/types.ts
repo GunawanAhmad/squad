@@ -1,5 +1,14 @@
 // Shapes of the Go API (main.go, agent.go).
-export interface Character { id: string; name: string; emoji: string; blurb: string; model: string; models: string[] | null }
+export type PortraitState = 'idle' | 'thinking' | 'talking';
+export interface Character {
+  id: string; name: string; model: string; models: string[] | null;
+  ui: {
+    tagline: string; description: string; accentColor: string; selectLine: string;
+    portrait: Record<PortraitState, string>;
+    stats: { label: string; value: number }[]; // value out of 10
+    voice: { pitch: number; rate: number; blipFrequency: number };
+  };
+}
 export interface ToolCall { name: string; args: string }
 export interface Message { role: 'user' | 'assistant'; content: string; tools?: ToolCall[] }
 export interface Chat { sessionId: string; messages: Message[]; model?: string }

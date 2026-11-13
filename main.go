@@ -17,15 +17,14 @@ import (
 var webFS embed.FS
 
 type Character struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Emoji    string   `json:"emoji"`
-	Blurb    string   `json:"blurb"`
-	Persona  string   `json:"persona"`
-	Provider string   `json:"provider"`
-	Model    string   `json:"model"`
-	Models   []string `json:"models"` // optional picker choices (see choice); must include the default
-	Tools    []string `json:"tools"`
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	UI       json.RawMessage `json:"ui"` // look, stats and voice; passed to the frontend as-is
+	Persona  string          `json:"persona"`
+	Provider string          `json:"provider"`
+	Model    string          `json:"model"`
+	Models   []string        `json:"models"` // optional picker choices (see choice); must include the default
+	Tools    []string        `json:"tools"`
 }
 
 type chatMsg struct {
@@ -78,7 +77,7 @@ func main() {
 	http.HandleFunc("GET /api/characters", func(w http.ResponseWriter, r *http.Request) {
 		public := make([]map[string]any, 0, len(list))
 		for _, c := range list {
-			public = append(public, map[string]any{"id": c.ID, "name": c.Name, "emoji": c.Emoji, "blurb": c.Blurb, "model": choice(c.Provider, c.Model), "models": c.Models})
+			public = append(public, map[string]any{"id": c.ID, "name": c.Name, "ui": c.UI, "model": choice(c.Provider, c.Model), "models": c.Models})
 		}
 		w.Header().Set("Content-Type", "application/json")
 		err := json.NewEncoder(w).Encode(public)

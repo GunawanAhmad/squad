@@ -1,8 +1,10 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/common';
+import markedKatex from 'marked-katex-extension';
+import 'katex/dist/katex.min.css';
 
-marked.use({ breaks: true });
+marked.use({ breaks: true }, markedKatex({ throwOnError: false })); // $…$ and $$…$$; bad TeX shows red instead of throwing
 
 DOMPurify.addHook('afterSanitizeAttributes', (n) => {
   if (n.tagName === 'A') {

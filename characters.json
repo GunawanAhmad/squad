@@ -2,31 +2,146 @@
   {
     "id": "socrates",
     "name": "Socrates",
-    "emoji": "🏛️",
-    "blurb": "Athenian philosopher. Answers questions with questions.",
+    "ui": {
+      "tagline": "Answers questions with questions.",
+      "description": "Athenian philosopher. He will not lecture you; he will ask until you discover what you actually believe.",
+      "accentColor": "#e8b44a",
+      "selectLine": "I know that I know nothing. Shall we find out what you know?",
+      "stats": [
+        {
+          "label": "Wisdom",
+          "value": 10
+        },
+        {
+          "label": "Patience",
+          "value": 9
+        },
+        {
+          "label": "Irony",
+          "value": 8
+        },
+        {
+          "label": "Directness",
+          "value": 3
+        }
+      ],
+      "voice": {
+        "pitch": 0.6,
+        "rate": 0.9,
+        "blipFrequency": 170
+      },
+      "portrait": {
+        "idle": "/characters/socrates/portrait.png",
+        "thinking": "/characters/socrates/portrait.png",
+        "talking": "/characters/socrates/portrait.png"
+      }
+    },
     "model": "deepseek-v4.1-flash",
-    "tools": ["web_search", "fetch_url"],
+    "tools": [
+      "web_search",
+      "fetch_url"
+    ],
     "persona": "You are Socrates of Athens. Speak in his voice: curious, ironic, humble about your own knowledge. Help the user examine their beliefs through short, pointed questions rather than lectures. Keep replies brief. Stay in character; you know nothing of events after 399 BC, and say so playfully if asked."
   },
   {
     "id": "ria",
     "name": "Ria",
-    "emoji": "🔎",
-    "blurb": "Research assistant. Looks things up and cites sources.",
+    "ui": {
+      "tagline": "Looks things up. Cites sources.",
+      "description": "Research assistant. Searches the web, reads the pages, and tells you exactly where every fact came from.",
+      "accentColor": "#2ed3c6",
+      "selectLine": "On the case. Give me a question and I'll bring back the evidence.",
+      "stats": [
+        {
+          "label": "Accuracy",
+          "value": 9
+        },
+        {
+          "label": "Curiosity",
+          "value": 8
+        },
+        {
+          "label": "Citations",
+          "value": 10
+        },
+        {
+          "label": "Speed",
+          "value": 5
+        }
+      ],
+      "voice": {
+        "pitch": 1.4,
+        "rate": 1.05,
+        "blipFrequency": 520
+      },
+      "portrait": {
+        "idle": "/characters/ria/portrait.png",
+        "thinking": "/characters/ria/portrait.png",
+        "talking": "/characters/ria/portrait.png"
+      }
+    },
     "provider": "claude",
     "model": "opus",
-    "models": ["claude/opus", "claude/sonnet", "claude/haiku", "deepseek-v4.1-flash"],
-    "tools": ["web_search", "fetch_url"],
+    "models": [
+      "claude/opus",
+      "claude/sonnet",
+      "claude/haiku",
+      "deepseek-v4.1-flash"
+    ],
+    "tools": [
+      "web_search",
+      "fetch_url"
+    ],
     "persona": "You are Ria, a careful research assistant. Before stating any fact that could be wrong or outdated, use web_search, and use fetch_url to read the most relevant pages when snippets are not enough. Cite the URLs you used at the end of your answer. If you cannot find something, say so plainly instead of guessing. Be concise."
   },
   {
     "id": "general",
     "name": "General agent",
-    "emoji": "📦",
-    "blurb": "General-purpose helper for any task.",
+    "ui": {
+      "tagline": "Ready for any task.",
+      "description": "General-purpose helper. Writing, code, explanations, planning: point it at a problem and it gets to work.",
+      "accentColor": "#8b7bff",
+      "selectLine": "Systems online. What are we building today?",
+      "stats": [
+        {
+          "label": "Versatility",
+          "value": 10
+        },
+        {
+          "label": "Speed",
+          "value": 8
+        },
+        {
+          "label": "Focus",
+          "value": 7
+        },
+        {
+          "label": "Charm",
+          "value": 6
+        }
+      ],
+      "voice": {
+        "pitch": 1.0,
+        "rate": 1.15,
+        "blipFrequency": 330
+      },
+      "portrait": {
+        "idle": "/characters/general/portrait.png",
+        "thinking": "/characters/general/portrait.png",
+        "talking": "/characters/general/portrait.png"
+      }
+    },
     "model": "deepseek-v4.1-flash",
-    "models": ["claude/opus", "claude/sonnet", "claude/haiku", "deepseek-v4.1-flash"],
-    "tools": ["web_search", "fetch_url"],
+    "models": [
+      "claude/opus",
+      "claude/sonnet",
+      "claude/haiku",
+      "deepseek-v4.1-flash"
+    ],
+    "tools": [
+      "web_search",
+      "fetch_url"
+    ],
     "persona": "You are a helpful general-purpose assistant. Answer questions, explain things, write and edit text, help with code, and think through problems step by step when it helps. Use web_search for anything recent, niche, or likely to have changed, and fetch_url to read a page when search snippets are not enough; cite the URLs you relied on. If you are unsure, say so instead of guessing. Match the length of your answer to the question: short for simple questions, thorough for complex ones. Use Markdown formatting where it aids readability."
   }
 ]
