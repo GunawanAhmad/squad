@@ -37,6 +37,7 @@ function select(c: Character) {
   controller?.abort();
   current.value = c;
   chat.value = load(c.id);
+  if (!c.models?.includes(chat.value.model!)) chat.value.model = c.model; // config may have changed since saving
   busy.value = false;
   nextTick(() => inputEl.value?.focus());
 }
@@ -44,7 +45,7 @@ function select(c: Character) {
 function clear() {
   if (!current.value || !confirm(`Clear your chat with ${current.value.name}?`)) return;
   controller?.abort();
-  chat.value = newChat();
+  chat.value = { ...newChat(), model: chat.value?.model };
   busy.value = false;
   save(current.value.id, chat.value);
 }
@@ -88,6 +89,7 @@ async function send() {
       body: JSON.stringify({
         characterId: forChar.id,
         sessionId: forChat.sessionId,
+        model: forChat.model,
         messages: forChat.messages.slice(0, -1).map(({ role, content }) => ({ role, content })),
       }),
     });
@@ -145,6 +147,19 @@ async function send() {
   <main>
     <header>
       <h2>{{ current ? `${current.emoji} ${current.name}` : 'Pick a character' }}</h2>
+      <select
+        v-if="current && chat && (current.models?.length ?? 0) > 1"
+        v-model="chat.model"
+        aria-label="Model"
+        @change="save(current.id, chat)"
+      >
+        <option
+          v-for="m in current.models"
+          :key="m"
+        >
+          {{ m }}
+        </option>
+      </select>
       <button
         v-if="current"
         @click="clear"

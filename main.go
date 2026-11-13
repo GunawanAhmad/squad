@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -23,6 +24,7 @@ type Character struct {
 	Persona  string   `json:"persona"`
 	Provider string   `json:"provider"`
 	Model    string   `json:"model"`
+	Models   []string `json:"models"` // optional picker choices (see choice); must include the default
 	Tools    []string `json:"tools"`
 }
 
@@ -35,6 +37,7 @@ type chatRequest struct {
 	CharacterID string    `json:"characterId"`
 	SessionID   string    `json:"sessionId"`
 	Messages    []chatMsg `json:"messages"`
+	Model       string    `json:"model"`
 }
 
 var sessionIDRe = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
@@ -60,6 +63,9 @@ func main() {
 				log.Fatalf("character %q: unknown tool %q", c.ID, t)
 			}
 		}
+		if len(c.Models) > 0 && !slices.Contains(c.Models, choice(c.Provider, c.Model)) {
+			log.Fatalf("character %q: models must include %q", c.ID, choice(c.Provider, c.Model))
+		}
 		chars[c.ID] = c
 	}
 
@@ -70,9 +76,9 @@ func main() {
 	http.Handle("GET /", http.FileServerFS(web))
 
 	http.HandleFunc("GET /api/characters", func(w http.ResponseWriter, r *http.Request) {
-		public := make([]map[string]string, 0, len(list))
+		public := make([]map[string]any, 0, len(list))
 		for _, c := range list {
-			public = append(public, map[string]string{"id": c.ID, "name": c.Name, "emoji": c.Emoji, "blurb": c.Blurb})
+			public = append(public, map[string]any{"id": c.ID, "name": c.Name, "emoji": c.Emoji, "blurb": c.Blurb, "model": choice(c.Provider, c.Model), "models": c.Models})
 		}
 		w.Header().Set("Content-Type", "application/json")
 		err := json.NewEncoder(w).Encode(public)
@@ -95,6 +101,16 @@ func main() {
 		if msg := validate(req); msg != "" {
 			http.Error(w, msg, http.StatusBadRequest)
 			return
+		}
+		if req.Model != "" && req.Model != choice(c.Provider, c.Model) {
+			if !slices.Contains(c.Models, req.Model) { // allowlist: the model string reaches the API and the claude CLI
+				http.Error(w, "unknown model", http.StatusBadRequest)
+				return
+			}
+			c.Provider, c.Model = "", req.Model
+			if m, ok := strings.CutPrefix(req.Model, "claude/"); ok {
+				c.Provider, c.Model = "claude", m
+			}
 		}
 
 		w.Header().Set("Content-Type", "application/x-ndjson")
@@ -148,6 +164,14 @@ func validate(req chatRequest) string {
 		return "last message must be from user"
 	}
 	return ""
+}
+
+// choice is how a provider+model pair appears in the picker: "claude/opus", or a bare opencode model name.
+func choice(provider, model string) string {
+	if provider == "claude" {
+		return "claude/" + model
+	}
+	return model
 }
 
 func envOr(k, def string) string {

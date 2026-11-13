@@ -85,7 +85,7 @@ func runChat(ctx context.Context, c Character, sessionID string, history []chatM
 
 		err := stream.Err()
 		if err != nil {
-			return nil
+			return err
 		}
 
 		err = stream.Close()
