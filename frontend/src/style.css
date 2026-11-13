@@ -394,20 +394,90 @@ header h2 {
   color: var(--accent);
 }
 
-header :is(button, select) {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: rgba(255, 255, 255, .04);
+/* Shared controls: GameButton / GameSelect */
+.game-btn, .game-select {
+  padding: 6px 14px;
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, var(--border));
+  background: rgba(10, 10, 18, .75);
   color: var(--text);
-  font: 500 13px var(--display);
+  font: 600 13px var(--display);
+  letter-spacing: .06em;
+  text-transform: uppercase;
   white-space: nowrap;
   cursor: pointer;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+  transition: border-color .12s, background .12s, box-shadow .12s, transform .08s;
 }
 
-header select { min-width: 0; }
+.game-btn:not(:disabled):hover, .game-select:hover {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 18%, #0a0a12);
+  box-shadow: inset 0 0 14px color-mix(in oklab, var(--accent) 35%, transparent);
+}
 
-header :is(button, select):hover { border-color: var(--accent); }
+.game-btn:not(:disabled):active { transform: translateY(1px); }
+
+/* clip-path hides outer outlines, so draw focus inside. */
+.game-btn:focus-visible, .game-select:focus-visible { outline: 2px solid #fff; outline-offset: -4px; }
+
+.game-btn:disabled { opacity: .45; cursor: default; }
+
+.game-btn.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #0b0b12;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.game-btn.primary:not(:disabled):hover {
+  background: color-mix(in oklab, var(--accent) 80%, white);
+  box-shadow: 0 0 16px color-mix(in oklab, var(--accent) 60%, transparent);
+}
+
+.game-select {
+  min-width: 0;
+  max-width: 220px;
+  padding-right: 30px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0h10L5 6z' fill='%23ececf2'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+/* Fallback popup (Firefox etc.): at least dark and readable. */
+.game-select option { background: #0e0e18; color: var(--text); }
+
+/* Fully themed popup where customizable select is supported (Chromium). */
+@supports (appearance: base-select) {
+  .game-select, .game-select::picker(select) { appearance: base-select; }
+  .game-select::picker-icon { display: none; } /* the background chevron stays */
+
+  .game-select::picker(select) {
+    margin-top: 4px;
+    padding: 4px;
+    border: 1px solid var(--accent);
+    background: rgba(8, 8, 14, .96);
+    box-shadow: 0 10px 28px #000a, 0 0 18px color-mix(in oklab, var(--accent) 30%, transparent);
+  }
+
+  .game-select option {
+    padding: 6px 10px;
+    background: none;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .game-select option:is(:hover, :focus-visible) {
+    outline: none;
+    background: color-mix(in oklab, var(--accent) 28%, transparent);
+  }
+
+  .game-select option:checked { color: var(--accent); }
+  .game-select option::checkmark { content: "▶"; font-size: 9px; }
+}
 
 #log {
   flex: 1;
@@ -548,21 +618,7 @@ textarea {
 
 textarea:focus { outline: 1px solid var(--accent); }
 
-form button {
-  padding: 0 18px;
-  border: 0;
-  border-radius: 6px;
-  background: var(--accent);
-  color: #0b0b12;
-  font: 700 14px var(--display);
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-form button:disabled {
-  opacity: .5;
-  cursor: default;
-}
+form .game-btn { padding: 0 20px; }
 
 /* Audio controls, top-left on every screen */
 .hud {
@@ -619,7 +675,7 @@ form button:disabled {
   .bust .portrait { flex: 0 1 auto; height: 100%; }
   .bust .nameplate { margin: 0 0 0 -12px; font-size: 22px; }
   header h2 { display: none; } /* the bust's nameplate already shows it */
-  header select { margin-left: auto; }
+  header .game-select { margin-left: auto; }
   main { border-left: 0; border-top: 2px solid color-mix(in oklab, var(--accent) 50%, transparent); }
   .read-aloud { position: static; float: right; }
   textarea { font-size: 16px; } /* prevents iOS zoom on focus */

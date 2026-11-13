@@ -3,6 +3,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { blip, play, stopSpeaking } from '../audio';
 import ChatMessage from './ChatMessage.vue';
 import CharacterPortrait from './CharacterPortrait.vue';
+import GameButton from './GameButton.vue';
+import GameSelect from './GameSelect.vue';
 import type { Character, Chat, PortraitState, StreamEvent } from '../types';
 
 const props = defineProps<{ character: Character }>();
@@ -159,29 +161,20 @@ async function send() {
 
     <main>
       <header>
-        <button
-          class="back"
-          @click="back"
-        >
+        <GameButton @click="back">
           ◀ Select
-        </button>
+        </GameButton>
         <h2>{{ c.name }}</h2>
-        <select
-          v-if="(c.models?.length ?? 0) > 1"
+        <GameSelect
+          v-if="c.models && c.models.length > 1"
           v-model="chat.model"
+          :options="c.models"
           aria-label="Model"
           @change="save(c.id, chat)"
-        >
-          <option
-            v-for="m in c.models"
-            :key="m"
-          >
-            {{ m }}
-          </option>
-        </select>
-        <button @click="clear">
+        />
+        <GameButton @click="clear">
           Clear chat
-        </button>
+        </GameButton>
       </header>
 
       <div
@@ -212,9 +205,12 @@ async function send() {
           @input="resize"
           @keydown.enter="onEnter"
         />
-        <button :disabled="busy">
+        <GameButton
+          variant="primary"
+          :disabled="busy"
+        >
           Send
-        </button>
+        </GameButton>
       </form>
     </main>
   </section>
