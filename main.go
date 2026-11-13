@@ -65,7 +65,7 @@ func main() {
 
 	web, _ := fs.Sub(webFS, "web")
 	if os.Getenv("DEV") != "" {
-		web = os.DirFS("web") // edit web/index.html and just refresh the browser
+		web = os.DirFS("web") // serve web/ from disk, so `make web` shows up without restarting
 	}
 	http.Handle("GET /", http.FileServerFS(web))
 
