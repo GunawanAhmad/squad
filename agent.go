@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -44,7 +45,7 @@ func loadSystemPrompt(c Character) string {
 		sysPrompt = fmt.Sprintf("%s\n\n%s", c.Persona, memory)
 	}
 
-	return sysPrompt
+	return sysPrompt + nowBlock(time.Now(), timeZone())
 }
 
 func runChat(ctx context.Context, c Character, sessionID string, history []chatMsg, send func(event)) error {
