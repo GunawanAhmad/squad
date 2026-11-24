@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"characters/assistant"
 	"characters/store"
@@ -30,10 +31,20 @@ type apiStore interface {
 var conversationIDRe = regexp.MustCompile(`^[A-Za-z0-9:_-]{1,80}$`)
 
 type server struct {
-	chars  map[string]Character
-	list   []Character
-	db     apiStore
-	runner *assistant.Runner
+	chars   map[string]Character
+	list    []Character
+	db      apiStore
+	records *store.Store // nullable in conversation-only tests
+	runner  *assistant.Runner
+	now     func() time.Time // injectable clock for tests
+}
+
+// clock is the server's wall clock (assistant.Now in production).
+func (s *server) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return assistant.Now()
 }
 
 func (s *server) routes(mux *http.ServeMux) {
@@ -43,6 +54,18 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/conversations/import", s.handleImportConversation)
 	mux.HandleFunc("GET /api/conversations/{id}/messages", s.handleMessages)
 	mux.HandleFunc("POST /api/conversations/{id}/messages", s.handlePostMessage)
+
+	mux.HandleFunc("GET /api/assistant/tasks", s.handleListTasks)
+	mux.HandleFunc("PATCH /api/assistant/tasks/{id}", s.handlePatchTask)
+	mux.HandleFunc("DELETE /api/assistant/tasks/{id}", s.handleDeleteTask)
+	mux.HandleFunc("GET /api/assistant/activities", s.handleListActivities)
+	mux.HandleFunc("PATCH /api/assistant/activities/{id}", s.handlePatchActivity)
+	mux.HandleFunc("DELETE /api/assistant/activities/{id}", s.handleDeleteActivity)
+	mux.HandleFunc("GET /api/assistant/reminders", s.handleListReminders)
+	mux.HandleFunc("PATCH /api/assistant/reminders/{id}", s.handlePatchReminder)
+	mux.HandleFunc("DELETE /api/assistant/reminders/{id}", s.handleDeleteReminder)
+	mux.HandleFunc("GET /api/assistant/settings", s.handleGetSettings)
+	mux.HandleFunc("PUT /api/assistant/settings", s.handlePutSettings)
 }
 
 func (s *server) handleCharacters(w http.ResponseWriter, _ *http.Request) {

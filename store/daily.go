@@ -550,3 +550,15 @@ func (s *Store) deleteOne(ctx context.Context, table string, id int64) error {
 	}
 	return nil
 }
+
+// DeleteCheckin removes a check-in row (undo of skip_checkin).
+func (s *Store) DeleteCheckin(ctx context.Context, day time.Time, kind string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM checkins WHERE day = $1 AND kind = $2`, Day(day), kind)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
