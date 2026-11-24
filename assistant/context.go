@@ -44,7 +44,8 @@ type ContextInput struct {
 	Window    int
 	Now       time.Time
 	Settings  Settings
-	Records   *Records // nil for persona chats
+	Records   *Records    // nil for persona chats
+	Retrieved []Retrieved // pre-retrieval hits, quoted as data
 }
 
 // BuildContext assembles persona, memory, the day's records, the clock and the
@@ -74,6 +75,10 @@ func BuildContext(in ContextInput) Context {
 		if len(rec.Digest) > 0 {
 			sections = append(sections, "recent_days")
 		}
+	}
+	if len(in.Retrieved) > 0 {
+		system += recallPrompt(in.Retrieved)
+		sections = append(sections, "recall")
 	}
 	system += NowBlock(now, loc)
 	sections = append(sections, "now")

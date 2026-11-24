@@ -195,16 +195,32 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 		loaded := LoadRecords(ctx, rs, day, set)
 		records = &loaded
 	}
+	var retrieved []Retrieved
+	if searcher, ok := r.store.(Searcher); ok && req.Character.Daily {
+		tz := set.TZ
+		if tz == "" && set.Loc != nil {
+			tz = set.Loc.String()
+		}
+		hits, err := Retrieve(ctx, searcher, req.Input, set.Loc, tz, cctxIDs(history))
+		if err != nil {
+			log.Printf("assistant: pre-retrieval: %v", err)
+		} else {
+			retrieved = hits
+		}
+	}
 	cctx := BuildContext(ContextInput{
 		Character: req.Character, Memory: memory, History: history,
-		Window: r.window, Now: now, Settings: set, Records: records,
+		Window: r.window, Now: now, Settings: set, Records: records, Retrieved: retrieved,
 	})
 
+	retrievedMessages, retrievedFacts := Retrieved{}.splitIDs(retrieved)
 	trace, _ := json.Marshal(contextTrace{
-		Sections:    cctx.Sections,
-		MessageIDs:  cctx.MessageIDs,
-		Window:      cctx.Window,
-		SystemChars: len(cctx.System),
+		Sections:            cctx.Sections,
+		MessageIDs:          cctx.MessageIDs,
+		Window:              cctx.Window,
+		SystemChars:         len(cctx.System),
+		RetrievedMessageIDs: retrievedMessages,
+		RetrievedFactIDs:    retrievedFacts,
 	})
 	kind := req.Kind
 	if kind == "" {
@@ -420,10 +436,21 @@ func (r *Runner) finish(ctx context.Context, runID int64, status, errMsg string,
 }
 
 type contextTrace struct {
-	Sections    []string `json:"sections"`
-	MessageIDs  []int64  `json:"message_ids"`
-	Window      int      `json:"window"`
-	SystemChars int      `json:"system_chars"`
+	Sections            []string `json:"sections"`
+	MessageIDs          []int64  `json:"message_ids"`
+	RetrievedMessageIDs []int64  `json:"retrieved_message_ids,omitempty"`
+	RetrievedFactIDs    []int64  `json:"retrieved_fact_ids,omitempty"`
+	Window              int      `json:"window"`
+	SystemChars         int      `json:"system_chars"`
+}
+
+// cctxIDs lists the ids already in the window so retrieval can skip them.
+func cctxIDs(history []store.Message) []int64 {
+	ids := make([]int64, 0, len(history))
+	for _, m := range history {
+		ids = append(ids, m.ID)
+	}
+	return ids
 }
 
 // traceArgs keeps a model's malformed arguments out of the jsonb column.

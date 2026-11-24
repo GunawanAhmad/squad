@@ -70,9 +70,13 @@ func TestBuildContextGolden(t *testing.T) {
 			Slipped:    []store.Task{{ID: 6, Title: "old thing", Status: "open", PlannedOn: &earlier}},
 		}},
 	}
+	retrieved := []Retrieved{
+		{Kind: "message", ID: 30, When: "2026-10-28", Who: "socrates", Text: "the unexamined life is not worth living"},
+		{Kind: "fact", ID: 12, When: "2026-10-01", Who: "preference", Text: "prefers short answers"},
+	}
 	got := golden(BuildContext(ContextInput{
 		Character: char, Memory: memory, History: history, Window: 5, Now: now,
-		Settings: Settings{Loc: loc, DayStartsAt: 4 * time.Hour}, Records: &rec,
+		Settings: Settings{Loc: loc, DayStartsAt: 4 * time.Hour}, Records: &rec, Retrieved: retrieved,
 	}))
 	// Window 5 keeps ids 3..7, which starts on a user turn.
 	if len(got.MessageIDs) != 5 || got.MessageIDs[0] != 3 || got.MessageIDs[4] != 7 {
