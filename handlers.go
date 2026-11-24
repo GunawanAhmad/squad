@@ -38,7 +38,6 @@ type server struct {
 
 func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/characters", s.handleCharacters)
-	mux.HandleFunc("POST /api/chat", s.handleChat) // removed in F-9 once the UI switches
 	mux.HandleFunc("POST /api/conversations", s.handleCreateConversation)
 	mux.HandleFunc("GET /api/conversations", s.handleListConversations)
 	mux.HandleFunc("POST /api/conversations/import", s.handleImportConversation)
@@ -260,42 +259,6 @@ func (s *server) handleImportConversation(w http.ResponseWriter, r *http.Request
 		}
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"id": req.SessionID, "imported": true, "messages": len(req.Messages)})
-}
-
-func (s *server) handleChat(w http.ResponseWriter, r *http.Request) {
-	var req chatRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&req); err != nil {
-		http.Error(w, "bad json", http.StatusBadRequest)
-		return
-	}
-	c, ok := s.chars[req.CharacterID]
-	if !ok {
-		http.Error(w, "unknown character", http.StatusBadRequest)
-		return
-	}
-	if msg := validate(req); msg != "" {
-		http.Error(w, msg, http.StatusBadRequest)
-		return
-	}
-	provider, model, err := resolveModel(c, req.Model)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	c.Provider, c.Model = provider, model
-
-	stream := newStream(w)
-	if c.Provider == "claude" {
-		if err := runClaude(r.Context(), c, req.SessionID, req.Messages, stream.event); err != nil && r.Context().Err() == nil {
-			log.Printf("chat %s: %v", c.ID, err)
-			stream.send(assistant.Event{Type: "error", Message: err.Error()})
-		}
-	} else {
-		if err := runChat(r.Context(), c, req.SessionID, req.Messages, stream.event); err != nil && r.Context().Err() == nil {
-			log.Printf("chat %s: %v", c.ID, err)
-			stream.send(assistant.Event{Type: "error", Message: err.Error()})
-		}
-	}
 }
 
 // resolveModel validates a picker choice against the character's allowlist and

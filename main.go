@@ -33,18 +33,6 @@ type Character struct {
 	Tools    []string        `json:"tools"`
 }
 
-type chatMsg struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type chatRequest struct {
-	CharacterID string    `json:"characterId"`
-	SessionID   string    `json:"sessionId"`
-	Messages    []chatMsg `json:"messages"`
-	Model       string    `json:"model"`
-}
-
 var sessionIDRe = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 
 // Stateless: the tools themselves keep no state (store-backed tools arrive in L-2).
@@ -112,25 +100,6 @@ func main() {
 	addr := envOr("ADDR", "127.0.0.1:8080") // localhost only: there is no auth, anyone who can reach it spends your quota
 	log.Printf("listening on http://%s", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
-}
-
-func validate(req chatRequest) string {
-	if !sessionIDRe.MatchString(req.SessionID) {
-		return "bad sessionId"
-	}
-	n := len(req.Messages)
-	if n == 0 || n > 200 {
-		return "messages must have 1-200 items"
-	}
-	for _, m := range req.Messages {
-		if (m.Role != "user" && m.Role != "assistant") || len(m.Content) > 50_000 {
-			return "bad message"
-		}
-	}
-	if req.Messages[n-1].Role != "user" {
-		return "last message must be from user"
-	}
-	return ""
 }
 
 // choice is how a provider+model pair appears in the picker: "claude/opus", or a bare opencode model name.
