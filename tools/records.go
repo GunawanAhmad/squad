@@ -371,7 +371,7 @@ func AddActivity(ctx context.Context, db *store.Store, description string, minut
 }
 
 // AddReminder validates and inserts a reminder in the user's zone.
-func AddReminder(ctx context.Context, db *store.Store, text, at, repeat string, now time.Time, loc *time.Location, toolCallID *int64) (store.Reminder, error) {
+func AddReminder(ctx context.Context, db *store.Store, text, at, repeat string, now time.Time, loc *time.Location, toolCallID, sourceMessageID *int64) (store.Reminder, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return store.Reminder{}, fmt.Errorf("%w: text is required", ErrInvalid)
@@ -390,7 +390,9 @@ func AddReminder(ctx context.Context, db *store.Store, text, at, repeat string, 
 	if !when.After(now) {
 		return store.Reminder{}, fmt.Errorf("%w: %s is in the past", ErrInvalid, when.In(orUTC(loc)).Format("15:04"))
 	}
-	return db.AddReminder(ctx, store.Reminder{Text: text, RemindAt: when, Repeat: repeat, ToolCallID: toolCallID})
+	return db.AddReminder(ctx, store.Reminder{
+		Text: text, RemindAt: when, Repeat: repeat, ToolCallID: toolCallID, SourceMessageID: sourceMessageID,
+	})
 }
 
 // NextOccurrence is when a repeating reminder fires again: the first matching

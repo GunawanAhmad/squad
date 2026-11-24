@@ -136,14 +136,14 @@ func TestRecordsActivitiesAndRemindersAPI(t *testing.T) {
 	}
 
 	// 15:00 today in Asia/Makassar.
-	rem, err := tools.AddReminder(ctx, db, "call mom", "15:00", "daily", testNow, settings.Loc, nil)
+	rem, err := tools.AddReminder(ctx, db, "call mom", "15:00", "daily", testNow, settings.Loc, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rem.RemindAt.In(settings.Loc).Format("15:04") != "15:00" {
 		t.Fatalf("reminder time: %v", rem.RemindAt)
 	}
-	if _, err := tools.AddReminder(ctx, db, "too late", "07:00", "", testNow, settings.Loc, nil); err == nil {
+	if _, err := tools.AddReminder(ctx, db, "too late", "07:00", "", testNow, settings.Loc, nil, nil); err == nil {
 		t.Fatal("a past reminder must be rejected")
 	}
 

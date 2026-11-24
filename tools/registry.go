@@ -57,6 +57,7 @@ func New() *Registry {
 		webSearchTool(), fetchURLTool(),
 		planTasksTool(), updateTaskTool(), completeTaskTool(), listTasksTool(),
 		logActivityTool(), queryActivitiesTool(),
+		remindMeTool(), listRemindersTool(), cancelReminderTool(),
 	} {
 		r.tools[t.Name] = t
 	}
