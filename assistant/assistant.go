@@ -48,6 +48,9 @@ type Config struct {
 	Location *time.Location
 	Window   int // last N messages, default DefaultWindow
 	MaxSteps int // model calls per turn, default 10
+	// BeforeTurn runs before the turn proceeds (e.g. the lazy daily backup).
+	// It must not fail the turn; errors are the hook's own business.
+	BeforeTurn func(ctx context.Context)
 }
 
 type Runner struct {
@@ -60,21 +63,24 @@ type Runner struct {
 	window   int
 	maxSteps int
 
+	beforeTurn func(context.Context)
+
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
 }
 
 func New(cfg Config) *Runner {
 	r := &Runner{
-		store:    cfg.Store,
-		tools:    cfg.Tools,
-		models:   cfg.Models,
-		memory:   cfg.Memory,
-		now:      cfg.Now,
-		loc:      cfg.Location,
-		window:   cfg.Window,
-		maxSteps: cfg.MaxSteps,
-		locks:    map[string]*sync.Mutex{},
+		store:      cfg.Store,
+		tools:      cfg.Tools,
+		models:     cfg.Models,
+		memory:     cfg.Memory,
+		now:        cfg.Now,
+		loc:        cfg.Location,
+		window:     cfg.Window,
+		maxSteps:   cfg.MaxSteps,
+		beforeTurn: cfg.BeforeTurn,
+		locks:      map[string]*sync.Mutex{},
 	}
 	if r.tools == nil {
 		r.tools = tools.New()
@@ -138,6 +144,9 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	defer lock.Unlock()
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
+	}
+	if r.beforeTurn != nil {
+		r.beforeTurn(ctx)
 	}
 
 	conv, err := r.store.CreateConversation(ctx, store.Conversation{

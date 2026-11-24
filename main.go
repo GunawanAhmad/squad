@@ -75,6 +75,7 @@ func main() {
 	}
 	defer db.Close()
 
+	backup := newDailyBackup(backupDir)
 	runner := assistant.New(assistant.Config{
 		Store: db,
 		Tools: toolRegistry,
@@ -82,9 +83,10 @@ func main() {
 			string(llm.OpenCodeProvider): openCodeModel(),
 			string(llm.ClaudeProvider):   claudeModel(),
 		},
-		Memory:   func(charID string) string { return memoryPrompt(Character{ID: charID}) },
-		Now:      assistant.Now,
-		Location: assistant.TimeZone(),
+		Memory:     func(charID string) string { return memoryPrompt(Character{ID: charID}) },
+		Now:        assistant.Now,
+		Location:   assistant.TimeZone(),
+		BeforeTurn: func(ctx context.Context) { backup.Maybe(ctx, assistant.Now()) },
 	})
 
 	s := &server{chars: chars, list: list, db: db, runner: runner}
