@@ -9,7 +9,7 @@ export interface Character {
     voice: { pitch: number; rate: number; blipFrequency: number };
   };
 }
-export interface ToolCall { name: string; args: string }
+export interface ToolCall { name: string; args: string; id?: number }
 export interface Message { role: 'user' | 'assistant'; content: string; tools?: ToolCall[] }
 
 export interface Conversation { id: string; characterId: string; createdAt: string; updatedAt: string; day?: string }
@@ -30,6 +30,30 @@ export interface LegacyChat { sessionId: string; messages: Message[]; model?: st
 
 export type StreamEvent =
   | { type: 'text'; delta: string }
-  | { type: 'tool'; name: string; args: string }
+  | { type: 'tool'; name: string; args: string; id?: number }
   | { type: 'error'; message: string }
   | { type: 'done'; runId: number; userMessageId: number; assistantMessageId: number };
+
+// Phase 1: the daily loop (handlers_records.go, handlers_due.go).
+export interface Task {
+  id: number; title: string; notes: string; status: 'open' | 'done' | 'dropped';
+  plannedOn?: string; dueOn?: string; timesMoved: number;
+  completedAt?: string; updatedAt: string; toolCallId?: number;
+  projectId?: number;
+}
+export interface Activity {
+  id: number; day: string; description: string; minutes?: number;
+  createdAt: string; toolCallId?: number; projectId?: number;
+}
+export interface Reminder {
+  id: number; text: string; remindAt: string; localTime: string; status: string;
+  repeat?: string; firedAt?: string; toolCallId?: number;
+}
+export interface AssistantSettings {
+  tz: string; dayStartsAt: string; morningAt: string; eveningAt: string; jobsModel: string;
+}
+export interface DueResult {
+  day: string; conversationId: string;
+  reminders: { id: number; text: string; at: string; missed: boolean }[];
+  checkin: string; busy: boolean;
+}

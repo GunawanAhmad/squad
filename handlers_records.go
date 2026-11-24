@@ -350,9 +350,10 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 // uses, restricted to the record whose button was pressed.
 func (s *server) handleUndo(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ToolCallID int64  `json:"toolCallId"`
-		Kind       string `json:"kind"`
-		ID         int64  `json:"id"`
+		ToolCallID     int64  `json:"toolCallId"`
+		Kind           string `json:"kind"`
+		ID             int64  `json:"id"`
+		ConversationID string `json:"conversationId"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
@@ -372,6 +373,17 @@ func (s *server) handleUndo(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		recordError(w, err)
 		return
+	}
+	// An undo from the Today panel also shows in the chat, so every tab sees it.
+	if req.ConversationID != "" && conversationIDRe.MatchString(req.ConversationID) {
+		if _, err := s.db.GetConversation(r.Context(), req.ConversationID); err == nil {
+			if _, err := s.db.AddMessage(r.Context(), store.Message{
+				ConversationID: req.ConversationID, Role: "assistant", Content: "↩ " + summary,
+			}); err != nil {
+				serverError(w, "record undo message", err)
+				return
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"undone": summary})
 }

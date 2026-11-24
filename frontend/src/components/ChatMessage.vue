@@ -4,6 +4,7 @@ import { highlight, renderMarkdown } from '../markdown';
 import type { Character, Message, ToolCall } from '../types';
 
 const props = defineProps<{ message: Message; character: Character }>();
+const emit = defineEmits<{ undo: [toolCallId: number] }>();
 const root = ref<HTMLElement | null>(null);
 
 const text = computed(() => {
@@ -15,12 +16,29 @@ const html = computed(() => (props.message.role === 'assistant' ? renderMarkdown
 onMounted(() => highlight(root.value));
 onUpdated(() => highlight(root.value));
 
+// Write tools carry the tool_calls row id while streaming, so their
+// confirmation can offer the same undo the chat command does.
+const WRITES = ['plan_tasks', 'update_task', 'complete_task', 'log_activity', 'remind_me', 'cancel_reminder', 'skip_checkin'];
+
 function toolLabel(t: ToolCall) {
-  let a: { query?: string; url?: string } = {};
+  let a: Record<string, unknown> = {};
   try { a = JSON.parse(t.args); } catch {}
-  if (t.name === 'web_search') return `🔎 searched: ${a.query ?? ''}`;
-  if (t.name === 'fetch_url') return `📄 read: ${a.url ?? ''}`;
-  return `🔧 ${t.name}`;
+  switch (t.name) {
+    case 'web_search': return `🔎 searched: ${a.query ?? ''}`;
+    case 'fetch_url': return `📄 read: ${a.url ?? ''}`;
+    case 'plan_tasks': return '✓ planned';
+    case 'update_task': return `✎ updated ${a.task ?? 'a plan'}`;
+    case 'complete_task': return `✓ ${a.status === 'dropped' ? 'dropped' : 'completed'} ${a.task ?? 'a plan'}`;
+    case 'log_activity': return `⏱ logged ${a.description ?? ''}`;
+    case 'query_activities': return '📋 looked up the log';
+    case 'remind_me': return `⏰ reminder: ${a.text ?? ''}`;
+    case 'list_reminders': return '📋 looked up reminders';
+    case 'list_tasks': return '📋 looked up plans';
+    case 'cancel_reminder': return '✕ reminder cancelled';
+    case 'skip_checkin': return '– skipped a check-in';
+    case 'undo': return '↩ undone';
+    default: return `🔧 ${t.name}`;
+  }
 }
 </script>
 
@@ -34,7 +52,17 @@ function toolLabel(t: ToolCall) {
       v-for="(t, i) in message.tools ?? []"
       :key="i"
       class="tool"
-    >{{ toolLabel(t) }}</span>
+    >
+      {{ toolLabel(t) }}
+      <button
+        v-if="t.id && WRITES.includes(t.name)"
+        class="undo-link"
+        title="Undo this write"
+        @click="emit('undo', t.id!)"
+      >
+        undo
+      </button>
+    </span>
     <!-- eslint-disable vue/no-v-html -- sanitized by DOMPurify in markdown.js -->
     <div
       v-if="html !== null"

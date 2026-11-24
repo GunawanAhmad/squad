@@ -222,9 +222,16 @@ func TestUndoEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec := do(t, mux, "POST", "/api/assistant/undo", map[string]any{"toolCallId": call.ID, "kind": "task", "id": task.ID})
+	rec := do(t, mux, "POST", "/api/assistant/undo", map[string]any{
+		"toolCallId": call.ID, "kind": "task", "id": task.ID, "conversationId": conv,
+	})
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "removed plan") {
 		t.Fatalf("undo: %d %s", rec.Code, rec.Body.String())
+	}
+	// The undo shows in the chat as an assistant message.
+	msgs, err := db.Messages(ctx, conv, 0, 0)
+	if err != nil || len(msgs) != 1 || !strings.Contains(msgs[0].Content, "↩ removed plan") {
+		t.Fatalf("undo message: %+v, %v", msgs, err)
 	}
 	if left, _ := db.Tasks(ctx, store.TaskFilter{}); len(left) != 0 {
 		t.Fatalf("task not undone: %+v", left)
@@ -305,5 +312,22 @@ func TestDueEndpoint(t *testing.T) {
 	msgs, err := db.Messages(context.Background(), "daily:2026-12-01", 0, 0)
 	if err != nil || len(msgs) != 1 || msgs[0].Content != "⏰ call mom" {
 		t.Fatalf("reminder message: %+v, %v", msgs, err)
+	}
+}
+
+func TestDailyThreadBeforeFourAM(t *testing.T) {
+	// 02:00 on 2 December in Makassar is still the 1st's thread.
+	s, _, mux := newRecordServer(t)
+	s.now = func() time.Time { return time.Date(2026, 12, 1, 18, 0, 0, 0, time.UTC) }
+	conv := decode[map[string]any](t, do(t, mux, "POST", "/api/conversations", map[string]any{"characterId": "assistant"}))
+	if conv["id"] != "daily:2026-12-01" {
+		t.Fatalf("02:00 thread: %+v", conv)
+	}
+
+	// 04:00 starts the next day.
+	s.now = func() time.Time { return time.Date(2026, 12, 1, 20, 0, 0, 0, time.UTC) }
+	conv = decode[map[string]any](t, do(t, mux, "POST", "/api/conversations", map[string]any{"characterId": "assistant"}))
+	if conv["id"] != "daily:2026-12-02" {
+		t.Fatalf("04:00 thread: %+v", conv)
 	}
 }
