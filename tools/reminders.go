@@ -15,9 +15,8 @@ import (
 
 func remindMeTool() *Tool {
 	return &Tool{
-		Name: "remind_me",
-		Description: "Set a reminder. at is a local time: \"15:00\", \"tomorrow 09:00\", \"in 30m\" or a full date. " +
-			"repeat is daily or weekdays for a standing reminder. Never schedule a time in the past.",
+		Name:        "remind_me",
+		Description: "Set a reminder. Only when the user asks to be reminded. at is a local time: \"15:00\", \"tomorrow 09:00\", \"in 30m\" or a full date. repeat is daily or weekdays for a standing reminder. Never schedule a time in the past.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

@@ -15,9 +15,8 @@ import (
 
 func logActivityTool() *Tool {
 	return &Tool{
-		Name: "log_activity",
-		Description: "Record something the user did. minutes only when they said how long. " +
-			"day defaults to today (yesterday/YYYY-MM-DD otherwise). Link a task when they finished one.",
+		Name:        "log_activity",
+		Description: "Record something the user did (past or just finished). Never use it for future plans. minutes only when they said how long. day defaults to today (yesterday/YYYY-MM-DD otherwise). Link a task when they finished one.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -80,9 +79,8 @@ func logActivityTool() *Tool {
 
 func queryActivitiesTool() *Tool {
 	return &Tool{
-		Name: "query_activities",
-		Description: "Read back what was recorded for a day or a range, with totals. Use it before answering " +
-			"\"what did I do today/yesterday\": the answer must come from these rows, never from memory.",
+		Name:        "query_activities",
+		Description: "Read back what was recorded for a day or a range, with totals. Only for questions about what the user did. Use it before answering \"what did I do today/yesterday\": the answer must come from these rows, never from memory.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

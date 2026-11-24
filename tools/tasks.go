@@ -38,9 +38,8 @@ func taskRefParams() map[string]any {
 
 func planTasksTool() *Tool {
 	return &Tool{
-		Name: "plan_tasks",
-		Description: "Record what the user wants to get done, one task per entry. Use the user's own wording. " +
-			"plannedOn defaults to today; use tomorrow or YYYY-MM-DD when they say so.",
+		Name:        "plan_tasks",
+		Description: "Record plans. Call this whenever the user states something they want to do (\"I need to\", \"I have to\", \"plan\", \"add\"), even if today's list already shows something similar. One entry per task, the user's own wording. plannedOn defaults to today; use tomorrow or YYYY-MM-DD when they say so.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -125,10 +124,9 @@ func updateTaskTool() *Tool {
 	props["project"] = map[string]any{"type": "string"}
 
 	return &Tool{
-		Name: "update_task",
-		Description: "Change an existing task: new title, notes, day, status or project. Moving a task to a later day " +
-			"counts as a slip. If a title matches more than one task, you get the candidates: ask which one.",
-		Parameters: params,
+		Name:        "update_task",
+		Description: "Change an existing task: new title, notes, day, status or project (\"move X to Monday\", \"X is tomorrow\", \"rename X\"). Moving a task to a later day counts as a slip. If a title matches more than one task, you get candidates: ask which one.",
+		Parameters:  params,
 		Run: func(ctx context.Context, env Env, raw string) (Result, error) {
 			day, err := recordDay(env)
 			if err != nil {
@@ -178,7 +176,7 @@ func completeTaskTool() *Tool {
 
 	return &Tool{
 		Name:        "complete_task",
-		Description: "Mark a task done (or dropped). Ask when it is unclear which task is meant or whether it was done or dropped.",
+		Description: "Mark a task done or dropped. \"I finished X\" → done; \"I dropped/stopped X\" → status dropped. Ask when it is unclear which task is meant or whether it was done or dropped.",
 		Parameters:  params,
 		Run: func(ctx context.Context, env Env, raw string) (Result, error) {
 			day, err := recordDay(env)
@@ -224,9 +222,8 @@ func completeTaskTool() *Tool {
 
 func listTasksTool() *Tool {
 	return &Tool{
-		Name: "list_tasks",
-		Description: "List tasks. Defaults to open tasks. Use it when the user asks what is left, what they planned, " +
-			"or to find the exact title of a task.",
+		Name:        "list_tasks",
+		Description: "Read the task list. Only for questions about existing plans (\"what is left\", \"what did I plan\") or to find a task's exact title; never to record one. Defaults to open tasks.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
