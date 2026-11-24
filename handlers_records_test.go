@@ -28,6 +28,7 @@ func newRecordServer(t *testing.T) (*server, *store.Store, *http.ServeMux) {
 	s := &server{
 		chars: map[string]Character{"assistant": {ID: "assistant", Name: "Assistant"}},
 		db:    db, records: db, now: func() time.Time { return testNow },
+		memoryDir: t.TempDir(),
 	}
 	mux := http.NewServeMux()
 	s.routes(mux)

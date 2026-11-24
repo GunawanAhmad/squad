@@ -57,3 +57,15 @@ export interface DueResult {
   reminders: { id: number; text: string; at: string; missed: boolean }[];
   checkin: string; busy: boolean;
 }
+
+// Memory screen (handlers_memory.go).
+export interface Fact {
+  id: number; text: string; category: string; core: boolean;
+  status: 'active' | 'superseded' | 'forgotten';
+  sourceKind: string; validFrom: string; validTo?: string;
+  supersededBy?: number; sourceMessageId?: number; useCount: number; createdAt: string;
+}
+export interface MemoryHit {
+  id: number; conversationId: string; characterId: string; role: string;
+  content: string; day: string; createdAt: string;
+}

@@ -31,13 +31,14 @@ type apiStore interface {
 var conversationIDRe = regexp.MustCompile(`^[A-Za-z0-9:_-]{1,80}$`)
 
 type server struct {
-	chars   map[string]Character
-	list    []Character
-	db      apiStore
-	records *store.Store // nullable in conversation-only tests
-	runner  *assistant.Runner
-	engine  *assistant.Engine // check-in engine; nil without an assistant character
-	now     func() time.Time  // injectable clock for tests
+	chars     map[string]Character
+	list      []Character
+	db        apiStore
+	records   *store.Store // nullable in conversation-only tests
+	memoryDir string       // memory/ (tests use a temp dir)
+	runner    *assistant.Runner
+	engine    *assistant.Engine // check-in engine; nil without an assistant character
+	now       func() time.Time  // injectable clock for tests
 }
 
 // settings is settings.tz and the day boundary; records is nil in tests.
@@ -86,6 +87,16 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/assistant/settings", s.handlePutSettings)
 	mux.HandleFunc("POST /api/assistant/undo", s.handleUndo)
 	mux.HandleFunc("GET /api/assistant/due", s.handleDue)
+
+	mux.HandleFunc("GET /api/memory/facts", s.handleListFacts)
+	mux.HandleFunc("PATCH /api/memory/facts/{id}", s.handlePatchFact)
+	mux.HandleFunc("GET /api/memory/facts/{id}/history", s.handleFactHistory)
+	mux.HandleFunc("POST /api/memory/facts/{id}/forget", s.handleForgetFact)
+	mux.HandleFunc("GET /api/memory/search", s.handleMemorySearch)
+	mux.HandleFunc("POST /api/memory/messages/{id}/forget", s.handleForgetMessage)
+	mux.HandleFunc("POST /api/memory/days/{day}/forget", s.handleForgetDay)
+	mux.HandleFunc("GET /api/memory/profile", s.handleGetProfile)
+	mux.HandleFunc("PUT /api/memory/profile", s.handlePutProfile)
 }
 
 func (s *server) handleCharacters(w http.ResponseWriter, _ *http.Request) {

@@ -2,11 +2,12 @@
 import { onMounted, ref } from 'vue';
 import { play, settings, unlock } from './audio';
 import ChatScreen from './components/ChatScreen.vue';
+import MemoryScreen from './components/MemoryScreen.vue';
 import SelectScreen from './components/SelectScreen.vue';
 import TitleScreen from './components/TitleScreen.vue';
 import type { Character } from './types';
 
-const screen = ref<'title' | 'select' | 'chat'>('title');
+const screen = ref<'title' | 'select' | 'chat' | 'memory'>('title');
 const chars = ref<Character[]>([]);
 const current = ref<Character | null>(null);
 
@@ -43,9 +44,13 @@ function pick(c: Character) {
       @back="screen = 'title'"
     />
     <ChatScreen
-      v-else-if="current"
+      v-else-if="screen === 'chat' && current"
       :key="current.id"
       :character="current"
+      @back="screen = 'select'"
+    />
+    <MemoryScreen
+      v-else-if="screen === 'memory'"
       @back="screen = 'select'"
     />
   </Transition>
@@ -67,5 +72,13 @@ function pick(c: Character) {
       aria-label="Volume"
       :disabled="settings.muted"
     >
+    <button
+      v-if="screen === 'select' || screen === 'memory'"
+      aria-label="Memory"
+      title="Memory"
+      @click="screen = screen === 'memory' ? 'select' : 'memory'"
+    >
+      🧠
+    </button>
   </div>
 </template>

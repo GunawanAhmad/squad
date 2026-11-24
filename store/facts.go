@@ -542,3 +542,40 @@ func (s *Store) NotedFacts(ctx context.Context, since time.Time, limit int) ([]F
 	}
 	return out, rows.Err()
 }
+
+// FactHistory returns a fact's whole supersede chain, oldest first (the fact
+// that was current, everything that replaced it, and its predecessor).
+func (s *Store) FactHistory(ctx context.Context, id int64) ([]Fact, error) {
+	cur, err := s.GetFact(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	// Walk back to the oldest fact in the chain.
+	for i := 0; i < 50; i++ {
+		var prevID int64
+		err := s.pool.QueryRow(ctx, `SELECT id FROM facts WHERE superseded_by = $1 LIMIT 1`, cur.ID).Scan(&prevID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if cur, err = s.GetFact(ctx, prevID); err != nil {
+			return nil, err
+		}
+	}
+	// Then forward from there.
+	var out []Fact
+	seen := map[int64]bool{}
+	for i := 0; i < 50 && !seen[cur.ID]; i++ {
+		seen[cur.ID] = true
+		out = append(out, cur)
+		if cur.SupersededBy == nil {
+			break
+		}
+		if cur, err = s.GetFact(ctx, *cur.SupersededBy); err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
