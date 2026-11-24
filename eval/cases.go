@@ -177,6 +177,8 @@ type seedActivity struct {
 func intPtr(v int) *int { return &v }
 
 // matchArg checks one expected argument against what the model produced.
+// lookupID, when set, resolves a task id ("#2", "2") to its title so that
+// naming the task by id counts as naming it.
 func matchArg(key string, got json.RawMessage, want string, lookupID func(int64) (string, bool)) bool {
 	if len(got) == 0 {
 		return false
@@ -213,16 +215,15 @@ func matchArg(key string, got json.RawMessage, want string, lookupID func(int64)
 		}
 		return d.Equal(mustParseDay(want))
 	case "tasks":
-		var args struct {
-			Tasks []struct {
-				Title string `json:"title"`
-			} `json:"tasks"`
+		// judgeTool passes the value of the "tasks" key, i.e. the array itself.
+		var tasks []struct {
+			Title string `json:"title"`
 		}
-		if err := json.Unmarshal(got, &args); err != nil || len(args.Tasks) == 0 {
+		if err := json.Unmarshal(got, &tasks); err != nil || len(tasks) == 0 {
 			return false
 		}
 		var titles []string
-		for _, t := range args.Tasks {
+		for _, t := range tasks {
 			titles = append(titles, strings.ToLower(t.Title))
 		}
 		joined := strings.Join(titles, "\n")

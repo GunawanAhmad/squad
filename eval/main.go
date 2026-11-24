@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -126,6 +127,22 @@ func main() {
 				printPassResult(model, "no unsolicited advice", res)
 			}
 		}
+		if contains(cfg.sets, "memory") {
+			res, err := runMemorySet(client, reg, persona, model, dsn, cfg.runs, cfg.maxSteps, cfg.limit, memoryCases, "memory")
+			if err != nil {
+				fmt.Printf("memory: %v\n", err)
+			} else {
+				printPassResult(model, "memory", res)
+			}
+		}
+		if contains(cfg.sets, "lang") {
+			res, err := runMemorySet(client, reg, persona, model, dsn, cfg.runs, cfg.maxSteps, cfg.limit, crossLanguageCases, "cross-language")
+			if err != nil {
+				fmt.Printf("cross-language: %v\n", err)
+			} else {
+				printPassResult(model, "cross-language recall", res)
+			}
+		}
 	}
 }
 
@@ -134,6 +151,8 @@ func printEstimate(cfg config) {
 	timeCalls := len(timeCases) * cfg.runs * 3 // a tool call plus a final answer, rounded up
 	adviceGen := len(adviceCases) * cfg.runs * 2
 	adviceJudge := len(adviceCases) * cfg.runs
+	memoryCalls := len(memoryCases) * cfg.runs * 4
+	langCalls := len(crossLanguageCases) * cfg.runs * 4
 	perModel := 0
 	models := cfg.models
 	if len(models) == 0 {
@@ -148,10 +167,18 @@ func printEstimate(cfg config) {
 	if contains(cfg.sets, "advice") {
 		perModel += adviceGen + adviceJudge
 	}
+	if contains(cfg.sets, "memory") {
+		perModel += memoryCalls
+	}
+	if contains(cfg.sets, "lang") {
+		perModel += langCalls
+	}
 	fmt.Println("Eval plan (no calls made):")
 	fmt.Printf("  tool calls: %d cases x %d runs = %d calls\n", len(toolCases), cfg.runs, toolCalls)
 	fmt.Printf("  time queries: %d cases x %d runs x ~3 = %d calls\n", len(timeCases), cfg.runs, timeCalls)
 	fmt.Printf("  no-advice: %d cases x %d runs x (generate + judge) = %d calls\n", len(adviceCases), cfg.runs, adviceGen+adviceJudge)
+	fmt.Printf("  memory: %d cases x %d runs x ~4 = %d calls\n", len(memoryCases), cfg.runs, memoryCalls)
+	fmt.Printf("  cross-language: %d cases x %d runs x ~4 = %d calls\n", len(crossLanguageCases), cfg.runs, langCalls)
 	fmt.Printf("  per model: ~%d calls\n", perModel)
 	fmt.Printf("  models (%d): %s\n", len(models), strings.Join(models, ", "))
 	fmt.Printf("  total: ~%d calls\n", perModel*len(models))
@@ -210,6 +237,9 @@ func runToolSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, per
 			ok, fieldsOK, fields := judgeTool(c, resp.ToolCalls, lookup)
 			out.fieldsOK += fieldsOK
 			out.fields += fields
+			if (ci*runs+i+1)%20 == 0 {
+				fmt.Printf("  tools %d/%d cases ...\n", ci+1, len(toolCases))
+			}
 			count := out.perCase[c.Text]
 			out.perCase[c.Text] = [2]int{count[0] + boolInt(ok), count[1] + 1}
 			if ok {
@@ -300,6 +330,9 @@ func runTimeSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, per
 		}
 		for i := 0; i < runs; i++ {
 			answer, _, err := runTurn(ctx, client, model, system, specs, reg, env, c.Question, maxSteps)
+			if (ci*runs+i+1)%6 == 0 {
+				fmt.Printf("  time %d/%d cases ...\n", ci+1, len(timeCases))
+			}
 			out.total++
 			out.perCase[c.Question] = add2(out.perCase[c.Question], 0, 0)
 			count := out.perCase[c.Question]
@@ -574,6 +607,17 @@ func printToolResult(model string, r toolResult) {
 	rate := percent(r.pass, r.total)
 	fieldRate := percent(r.fieldsOK, r.fields)
 	fmt.Printf("tool calls:        %d/%d pass (%.1f%%), fields %d/%d (%.1f%%)\n", r.pass, r.total, rate, r.fieldsOK, r.fields, fieldRate)
+	// Per-case failures are what tells you which description to fix.
+	var cases []string
+	for text, counts := range r.perCase {
+		if counts[0] < counts[1] {
+			cases = append(cases, fmt.Sprintf("  %d/%d  %s", counts[0], counts[1], text))
+		}
+	}
+	sort.Strings(cases)
+	for _, line := range cases {
+		fmt.Println(line)
+	}
 	printFailures(r.firstFailure)
 }
 
@@ -666,4 +710,217 @@ func loadDotEnv(path string) {
 			_ = os.Setenv(k, strings.Trim(strings.TrimSpace(v), `"'`))
 		}
 	}
+}
+
+// ---- memory and cross-language sets ---------------------------------------
+
+var memoryTools = []string{"remember", "forget", "recall"}
+
+func memorySpecs(reg *tools.Registry) []llm.ToolSpec {
+	all := append(append([]string{}, assistantTools...), memoryTools...)
+	return reg.Specs(all)
+}
+
+func seedMemory(ctx context.Context, db *store.Store, c memoryCase) error {
+	for _, m := range c.Messages {
+		at := evalNow.AddDate(0, 0, -m.DaysAgo)
+		day := store.Day(at)
+		convID := "seed:" + m.CharacterID
+		var convDay *time.Time
+		if m.CharacterID == "assistant" {
+			convID = "daily:" + store.DayString(day)
+			convDay = &day
+		}
+		if _, err := db.CreateConversation(ctx, store.Conversation{ID: convID, CharacterID: m.CharacterID, Day: convDay}); err != nil {
+			return err
+		}
+		if _, err := db.AddMessageAt(ctx, store.Message{ConversationID: convID, Role: m.Role, Content: m.Content}, at); err != nil {
+			return err
+		}
+	}
+	for _, f := range c.Facts {
+		at := evalNow.AddDate(0, 0, -f.ValidDaysAgo)
+		var source *int64
+		if f.FromMessage != "" {
+			day := store.Day(at)
+			convID := "daily:" + store.DayString(day)
+			if _, err := db.CreateConversation(ctx, store.Conversation{ID: convID, CharacterID: "assistant", Day: &day}); err != nil {
+				return err
+			}
+			msg, err := db.AddMessageAt(ctx, store.Message{ConversationID: convID, Role: "user", Content: f.FromMessage}, at)
+			if err != nil {
+				return err
+			}
+			source = &msg.ID
+		}
+		if _, err := db.AddFact(ctx, store.Fact{
+			Text: f.Text, Category: f.Category, Core: f.Core, SourceKind: "user",
+			SourceMessageID: source, ValidFrom: store.Day(at),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// coreFactsBlock mirrors the app's <memory> block for the always-in-context
+// facts, so the eval sees what a real turn sees.
+func coreFactsBlock(ctx context.Context, db *store.Store) string {
+	facts, err := db.CoreFacts(ctx, 30)
+	if err != nil || len(facts) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n<memory>\nNotes may be outdated. The current messages win. Don't mention these notes unless asked.\n\n<facts>\n")
+	for _, f := range facts {
+		fmt.Fprintf(&b, "- [%d] (%s) %s\n", f.ID, f.Category, f.Text)
+	}
+	b.WriteString("</facts>\n\n</memory>\n")
+	return b.String()
+}
+
+func runMemorySet(client llm.Model, reg *tools.Registry, persona, model, dsn string, runs, maxSteps, limit int, cases []memoryCase, label string) (passResult, error) {
+	ctx := context.Background()
+	specs := memorySpecs(reg)
+	settings := assistant.Settings{
+		TZ: "Asia/Makassar", Loc: evalLoc, DayStartsAt: 4 * time.Hour,
+		MorningAt: 8 * time.Hour, EveningAt: 21 * time.Hour,
+	}
+	out := passResult{perCase: map[string][2]int{}}
+	for ci, c := range cases {
+		if limit > 0 && ci >= limit {
+			break
+		}
+		for i := 0; i < runs; i++ {
+			db, cleanup, err := storetest.NewSchema(ctx, dsn)
+			if err != nil {
+				return out, err
+			}
+			if err := seedMemory(ctx, db, c); err != nil {
+				cleanup()
+				return out, err
+			}
+			rec := assistant.LoadRecords(ctx, db, evalDay, settings)
+			var retrieved []assistant.Retrieved
+			if len(c.Turns) > 0 {
+				retrieved, _ = assistant.Retrieve(ctx, db, c.Turns[0], evalLoc, "Asia/Makassar", nil)
+			}
+			system := assistant.BuildContext(assistant.ContextInput{
+				Character: assistant.Character{ID: "assistant", Name: "Assistant", Persona: persona, Tools: append(assistantTools, memoryTools...), Daily: true},
+				Memory:    coreFactsBlock(ctx, db),
+				Window:    40, Now: evalNow, Settings: settings, Records: &rec, Retrieved: retrieved,
+			}).System
+			env := tools.Env{
+				CharacterID: "assistant", Allowed: append(assistantTools, memoryTools...),
+				Now: evalNow, DB: db, Day: evalDay, Loc: evalLoc,
+			}
+			answer, called, runErr := runScript(ctx, client, model, system, specs, reg, env, c.Turns, maxSteps)
+			if runErr == nil && c.Check != nil {
+				runErr = c.Check(ctx, db)
+			}
+			cleanup()
+
+			out.total++
+			key := c.Name
+			out.perCase[key] = add2(out.perCase[key], 0, 0)
+			count := out.perCase[key]
+			pass, why := false, ""
+			if runErr != nil {
+				why = runErr.Error()
+			} else {
+				pass, why = judgeMemory(c, answer, called)
+			}
+			if pass {
+				out.pass++
+				out.perCase[key] = [2]int{count[0] + 1, count[1] + 1}
+			} else {
+				out.perCase[key] = [2]int{count[0], count[1] + 1}
+				if len(out.firstFailure) < 6 {
+					out.firstFailure = append(out.firstFailure, fmt.Sprintf("%s (%s): %s", key, why, truncate(answer, 200)))
+				}
+			}
+		}
+		if (ci+1)%5 == 0 {
+			fmt.Printf("  %s %d/%d cases ...\n", label, ci+1, len(cases))
+		}
+	}
+	return out, nil
+}
+
+func judgeMemory(c memoryCase, answer string, called []string) (bool, string) {
+	lower := strings.ToLower(answer)
+	if strings.TrimSpace(lower) == "" {
+		return false, "empty answer"
+	}
+	for _, need := range c.MustCall {
+		found := false
+		for _, name := range called {
+			if strings.EqualFold(name, need) {
+				found = true
+			}
+		}
+		if !found {
+			return false, "did not call " + need
+		}
+	}
+	for _, must := range c.MustAll {
+		if !strings.Contains(lower, strings.ToLower(must)) {
+			return false, "missing " + must
+		}
+	}
+	for _, bad := range c.MustNot {
+		if strings.Contains(lower, strings.ToLower(bad)) {
+			return false, "contains " + bad
+		}
+	}
+	for _, group := range c.MustAny {
+		found := false
+		for _, opt := range group {
+			if strings.Contains(lower, strings.ToLower(opt)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false, "missing any of " + strings.Join(group, "/")
+		}
+	}
+	return true, ""
+}
+
+// runScript plays several user turns, executing the model's tools for real.
+func runScript(ctx context.Context, client llm.Model, model, system string, specs []llm.ToolSpec, reg *tools.Registry, env tools.Env, turns []string, maxSteps int) (string, []string, error) {
+	var msgs []llm.Message
+	var called []string
+	last := ""
+	for _, turn := range turns {
+		msgs = append(msgs, llm.Message{Role: "user", Content: turn})
+		for step := 0; step < maxSteps; step++ {
+			resp, err := client.Stream(ctx, llm.Request{
+				Model: model, System: system, Messages: msgs, Tools: specs, Session: "eval-memory",
+			}, func(string) {})
+			if err != nil {
+				return last, called, err
+			}
+			msgs = append(msgs, llm.Message{Role: "assistant", Content: resp.Text, ToolCalls: resp.ToolCalls, Reasoning: resp.Reasoning})
+			if resp.Text != "" {
+				last = resp.Text
+			}
+			if len(resp.ToolCalls) == 0 {
+				break
+			}
+			for _, tc := range resp.ToolCalls {
+				called = append(called, tc.Name)
+				out := "error: no result"
+				res, err := reg.Run(ctx, env, tc.Name, tc.Arguments)
+				if err != nil {
+					out = "error: " + err.Error()
+				} else {
+					out = res.Text
+				}
+				msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: out})
+			}
+		}
+	}
+	return last, called, nil
 }
