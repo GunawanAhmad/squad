@@ -1,5 +1,8 @@
 export GOFLAGS := -buildvcs=false
 
+# Not ./...: frontend/node_modules contains stray Go packages (flatted).
+GO_PKGS := $(shell go list ./... 2>/dev/null | grep -v node_modules)
+
 .PHONY: dev ui web lint build test search down
 
 # Start SearXNG, then run the app on :8080, serving the built UI from web/.
@@ -25,7 +28,8 @@ build: web
 	go build -o characters .
 
 test: web lint
-	go vet . && go test . # not ./...: frontend/node_modules contains stray Go packages
+	go vet $(GO_PKGS)
+	go test $(GO_PKGS) # not ./...: frontend/node_modules contains stray Go packages
 
 search:
 	docker compose up -d --wait
