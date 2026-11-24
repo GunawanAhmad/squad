@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Fake is a scripted Model for tests. It is intentionally in the normal
@@ -17,6 +18,10 @@ type FakeStep struct {
 	// Block waits for the context to end before returning its Err, to test
 	// cancellation and to keep a turn in flight for lock tests.
 	Block bool
+	// Delay simulates a slow model call (lock tests).
+	Delay time.Duration
+	// Started, when set, receives one value when Stream begins.
+	Started chan<- struct{}
 }
 
 type Fake struct {
@@ -46,11 +51,19 @@ func (f *Fake) Stream(ctx context.Context, req Request, onText func(string)) (Re
 	}
 	f.mu.Unlock()
 
-	defer func() {
-		f.mu.Lock()
-		f.active--
-		f.mu.Unlock()
-	}()
+	if step.Started != nil {
+		step.Started <- struct{}{}
+	}
+	if step.Delay > 0 {
+		select {
+		case <-time.After(step.Delay):
+		case <-ctx.Done():
+			f.decrActive()
+			return Response{}, ctx.Err()
+		}
+	}
+
+	defer f.decrActive()
 
 	if step.Block {
 		<-ctx.Done()
@@ -63,6 +76,12 @@ func (f *Fake) Stream(ctx context.Context, req Request, onText func(string)) (Re
 		return Response{}, step.Err
 	}
 	return Response{Text: step.Text, ToolCalls: step.ToolCalls, Reasoning: step.Reasoning, Usage: step.Usage}, nil
+}
+
+func (f *Fake) decrActive() {
+	f.mu.Lock()
+	f.active--
+	f.mu.Unlock()
 }
 
 // Requests returns a copy of the requests seen so far.

@@ -1,24 +1,25 @@
-package main
+package assistant
 
 import (
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 )
 
-const defaultTZ = "Asia/Makassar"
+const DefaultTZ = "Asia/Makassar"
 
-// localNow is the wall clock the model is told about. TZ picks the zone; the plan
-// moves this into the settings table in L-1.
-func localNow() time.Time {
-	return time.Now().In(timeZone())
-}
+// Now is the wall clock the model is told about.
+func Now() time.Time { return time.Now().In(TimeZone()) }
 
-// timeZone loads TZ (default Asia/Makassar), falling back to UTC with a log line
-// rather than silently using the server's zone.
-func timeZone() *time.Location {
-	name := envOr("TZ", defaultTZ)
+// TimeZone loads TZ (default Asia/Makassar), falling back to UTC with a log
+// line rather than silently using the server's zone.
+func TimeZone() *time.Location {
+	name := os.Getenv("TZ")
+	if name == "" {
+		name = DefaultTZ
+	}
 	loc, err := time.LoadLocation(name)
 	if err != nil {
 		log.Printf("TZ %q is not a known time zone (%v); using UTC", name, err)
@@ -27,9 +28,9 @@ func timeZone() *time.Location {
 	return loc
 }
 
-// nowBlock is what makes "what day is it?" answerable. It sits in the system
-// prompt on both routes, so the Claude CLI route gets it too.
-func nowBlock(now time.Time, loc *time.Location) string {
+// NowBlock is what makes "what day is it?" answerable. It is part of the
+// system prompt on both routes.
+func NowBlock(now time.Time, loc *time.Location) string {
 	t := now.In(loc)
 	_, offset := t.Zone()
 

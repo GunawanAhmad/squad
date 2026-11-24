@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"characters/assistant"
 	"characters/llm"
 	"characters/tools"
 )
@@ -40,7 +41,7 @@ func loadSystemPrompt(c Character) string {
 		sysPrompt = c.Persona + "\n\n" + memory
 	}
 
-	return sysPrompt + nowBlock(time.Now(), timeZone())
+	return sysPrompt + assistant.NowBlock(time.Now(), assistant.TimeZone())
 }
 
 // runChat is the old /api/chat loop. F-7 moves it to assistant.Turn and F-9
