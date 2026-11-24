@@ -35,8 +35,20 @@ var client = sync.OnceValue(func() *openai.Client {
 	return &c
 })
 
+func loadSystemPrompt(c Character) string {
+	memory := memoryPrompt(c)
+	sysPrompt := c.Persona
+
+	// Can we not trim everything before send this?
+	if strings.TrimSpace(memory) != "" {
+		sysPrompt = fmt.Sprintf("%s\n\n%s", c.Persona, memory)
+	}
+
+	return sysPrompt
+}
+
 func runChat(ctx context.Context, c Character, sessionID string, history []chatMsg, send func(event)) error {
-	msgs := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(c.Persona)}
+	msgs := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(loadSystemPrompt(c))}
 	for _, m := range history {
 		if m.Role == "user" {
 			msgs = append(msgs, openai.UserMessage(m.Content))
@@ -124,6 +136,7 @@ func transcript(history []chatMsg) string {
 	}
 
 	var b strings.Builder
+	b.WriteString("<conversation>\n\n")
 	b.WriteString("Conversation so far:\n\n")
 
 	for _, m := range history[:len(history)-1] {
@@ -136,14 +149,15 @@ func transcript(history []chatMsg) string {
 
 	b.WriteString("Reply to the user's latest message:\n\n")
 	b.WriteString(history[len(history)-1].Content)
+	b.WriteString("\n\n</conversation>\n")
 
 	return b.String()
 }
 
-func runClaude(ctx context.Context, c Character, sessionID string, history []chatMsg, send func(event)) error {
+func runClaude(ctx context.Context, c Character, _ string, history []chatMsg, send func(event)) error {
 	cmd := exec.CommandContext(ctx, "claude", "-p",
 		"--output-format", "stream-json", "--verbose", "--include-partial-messages",
-		"--system-prompt", c.Persona, // replaces Claude Code's own prompt
+		"--system-prompt", loadSystemPrompt(c), // replaces Claude Code's own prompt
 		"--model", c.Model,
 		"--tools", "WebSearch,WebFetch", // nothing else: no shell, no file access
 		"--allowedTools", "WebSearch,WebFetch", // no permission prompts in -p mode
@@ -151,6 +165,7 @@ func runClaude(ctx context.Context, c Character, sessionID string, history []cha
 		"--strict-mcp-config", // skip your MCP servers
 		"--no-session-persistence",
 	)
+
 	tmpDir := os.TempDir()
 	cmd.Dir = tmpDir
 	cmd.Env = []string{}
