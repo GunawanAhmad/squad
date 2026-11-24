@@ -456,8 +456,9 @@ func ActivityLine(a store.Activity) string {
 // the state the write left behind: if the row changed since, undo refuses
 // instead of clobbering the newer edit.
 type UndoOp struct {
-	Op             string          `json:"op"` // delete_task | restore_task | delete_activity | cancel_reminder | restore_reminder | unskip_checkin
+	Op             string          `json:"op"` // delete_task | restore_task | delete_activity | cancel_reminder | restore_reminder | unskip_checkin | forget_fact | restore_fact
 	TaskID         int64           `json:"task_id,omitempty"`
+	FactID         int64           `json:"fact_id,omitempty"`
 	ActivityID     int64           `json:"activity_id,omitempty"`
 	ReminderID     int64           `json:"reminder_id,omitempty"`
 	CheckinDay     string          `json:"checkin_day,omitempty"`
@@ -466,6 +467,7 @@ type UndoOp struct {
 	ExpectStatus   string          `json:"expect_status,omitempty"`  // reminders: status at write time
 	PreviousTask   json.RawMessage `json:"previous_task,omitempty"`
 	PreviousRemind json.RawMessage `json:"previous_reminder,omitempty"`
+	PreviousFact   json.RawMessage `json:"previous_fact,omitempty"`
 }
 
 func encodeUndo(op UndoOp) []byte {
@@ -548,6 +550,8 @@ func (op UndoOp) target() (string, int64) {
 		return "reminder", op.ReminderID
 	case "unskip_checkin":
 		return "checkin", 0
+	case "forget_fact", "restore_fact":
+		return "fact", op.FactID
 	}
 	return "", 0
 }
@@ -634,6 +638,36 @@ func applyUndoOp(ctx context.Context, db *store.Store, op UndoOp) (string, error
 		}
 		return fmt.Sprintf("restored reminder #%d %q", prev.ID, prev.Text), nil
 
+	case "forget_fact":
+		f, err := db.GetFact(ctx, op.FactID)
+		if err != nil {
+			return "", fmt.Errorf("%w: fact #%d is already gone", ErrConflict, op.FactID)
+		}
+		if err := expectFactState(f, op); err != nil {
+			return "", err
+		}
+		if err := db.ForgetFact(ctx, f.ID, time.Now()); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("removed fact #%d %q", f.ID, f.Text), nil
+
+	case "restore_fact":
+		var prev store.Fact
+		if err := json.Unmarshal(op.PreviousFact, &prev); err != nil {
+			return "", fmt.Errorf("bad fact snapshot: %w", err)
+		}
+		current, err := db.GetFact(ctx, prev.ID)
+		if err != nil {
+			return "", fmt.Errorf("%w: fact #%d is already gone", ErrConflict, prev.ID)
+		}
+		if err := expectFactState(current, op); err != nil {
+			return "", err
+		}
+		if _, err := db.UpdateFact(ctx, prev); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("restored fact #%d %q (%s)", prev.ID, prev.Text, prev.Status), nil
+
 	case "unskip_checkin":
 		day, err := time.Parse("2006-01-02", op.CheckinDay)
 		if err != nil {
@@ -649,6 +683,20 @@ func applyUndoOp(ctx context.Context, db *store.Store, op UndoOp) (string, error
 		return fmt.Sprintf("re-enabled the %s check-in on %s", op.CheckinKind, op.CheckinDay), nil
 	}
 	return "", fmt.Errorf("%w: unknown undo operation %q", ErrConflict, op.Op)
+}
+
+func expectFactState(f store.Fact, op UndoOp) error {
+	if op.ExpectUpdated == "" {
+		return nil
+	}
+	want, err := time.Parse(time.RFC3339Nano, op.ExpectUpdated)
+	if err != nil {
+		return fmt.Errorf("undo: bad expected time: %w", err)
+	}
+	if !f.UpdatedAt.Truncate(time.Microsecond).Equal(want.Truncate(time.Microsecond)) {
+		return fmt.Errorf("%w: fact #%d changed since; not undoing", ErrConflict, f.ID)
+	}
+	return nil
 }
 
 func expectTaskState(t store.Task, op UndoOp) error {

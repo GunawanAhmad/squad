@@ -203,6 +203,22 @@ func (s *Store) Messages(ctx context.Context, conversationID string, after int64
 	return scanMessages(rows)
 }
 
+// GetMessage returns one message (to show where a fact came from, or to hide
+// it when the fact is forgotten).
+func (s *Store) GetMessage(ctx context.Context, id int64) (Message, error) {
+	var m Message
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, conversation_id, role, content, COALESCE(tool_calls, 'null'::jsonb),
+		       COALESCE(tool_call_id, ''), run_id, created_at, forgotten_at
+		FROM messages WHERE id = $1`, id).
+		Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &m.ToolCalls,
+			&m.ToolCallID, &m.RunID, &m.CreatedAt, &m.ForgottenAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Message{}, ErrNotFound
+	}
+	return m, err
+}
+
 // RecentMessages returns the last n messages, oldest first.
 func (s *Store) RecentMessages(ctx context.Context, conversationID string, n int) ([]Message, error) {
 	rows, err := s.pool.Query(ctx, `

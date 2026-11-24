@@ -141,10 +141,10 @@ func (s *Store) Facts(ctx context.Context, f FactFilter) ([]Fact, error) {
 func (s *Store) UpdateFact(ctx context.Context, f Fact) (Fact, error) {
 	row := s.pool.QueryRow(ctx, `
 		UPDATE facts SET text = $2, category = $3, core = $4, status = $5,
-			valid_from = $6, valid_to = $7, updated_at = now()
+			valid_from = $6, valid_to = $7, superseded_by = $8, updated_at = now()
 		WHERE id = $1
 		RETURNING `+factCols,
-		f.ID, strings.TrimSpace(f.Text), f.Category, f.Core, f.Status, Day(f.ValidFrom), f.ValidTo)
+		f.ID, strings.TrimSpace(f.Text), f.Category, f.Core, f.Status, Day(f.ValidFrom), f.ValidTo, f.SupersededBy)
 	return scanFact(row)
 }
 
@@ -256,14 +256,14 @@ type MessageQuery struct {
 
 // MessageHit is one search result with enough context to be quoted.
 type MessageHit struct {
-	ID          int64
+	ID             int64
 	ConversationID string
-	CharacterID string
-	Day         *time.Time // daily thread day
-	Role        string
-	Content     string
-	CreatedAt   time.Time
-	Rank        float64
+	CharacterID    string
+	Day            *time.Time // daily thread day
+	Role           string
+	Content        string
+	CreatedAt      time.Time
+	Rank           float64
 }
 
 // SearchMessages finds messages by words, ranked by full-text rank with a

@@ -36,6 +36,9 @@ function toolLabel(t: ToolCall) {
     case 'list_tasks': return '📋 looked up plans';
     case 'cancel_reminder': return '✕ reminder cancelled';
     case 'skip_checkin': return '– skipped a check-in';
+    case 'remember': return '🧠 remembered';
+    case 'forget': return '🗑 forget';
+    case 'recall': return '🔍 searched the past';
     case 'undo': return '↩ undone';
     default: return `🔧 ${t.name}`;
   }
