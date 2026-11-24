@@ -345,7 +345,8 @@ func TestAPIBadRequests(t *testing.T) {
 	}{
 		{"unknown character", `{"characterId":"nope"}`, "/api/conversations", http.StatusBadRequest},
 		{"bad json", `{`, "/api/conversations", http.StatusBadRequest},
-		{"unknown conversation", `{"content":"hi"}`, "/api/conversations/nope/messages", http.StatusNotFound},
+		{"unknown conversation post", `{"content":"hi"}`, "/api/conversations/nope/messages", http.StatusNotFound},
+		{"unknown conversation get", ``, "/api/conversations/nope/messages", http.StatusNotFound},
 		{"bad conversation id", `{"content":"hi"}`, "/api/conversations/bad%20id/messages", http.StatusBadRequest},
 		{"empty content", `{"content":"  "}`, "/api/conversations/" + id + "/messages", http.StatusBadRequest},
 		{"unknown model", `{"content":"hi","model":"gpt-x"}`, "/api/conversations/" + id + "/messages", http.StatusBadRequest},
@@ -355,7 +356,7 @@ func TestAPIBadRequests(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			method := "POST"
-			if tc.body == "" || (tc.path == "/api/conversations?characterId=nope") {
+			if tc.body == "" {
 				method = "GET"
 			}
 			w := doJSON(t, h, method, tc.path, tc.body)

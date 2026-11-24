@@ -114,14 +114,21 @@ func (s *server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad limit", http.StatusBadRequest)
 		return
 	}
+	// A stale browser id (e.g. after a database reset) must be distinguishable
+	// from an empty chat, so the UI can create a new conversation.
+	if _, err := s.db.GetConversation(r.Context(), id); errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "unknown conversation", http.StatusNotFound)
+		return
+	} else if err != nil {
+		serverError(w, "get conversation", err)
+		return
+	}
 
 	msgs, err := s.db.Messages(r.Context(), id, after, limit)
 	if err != nil {
 		serverError(w, "get messages", err)
 		return
 	}
-	// An unknown id and an empty conversation look the same to the UI: it then
-	// creates a new conversation.
 	out := make([]map[string]any, 0, len(msgs))
 	for _, m := range msgs {
 		out = append(out, messageJSON(m))
