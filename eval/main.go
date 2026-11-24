@@ -33,6 +33,7 @@ type config struct {
 	sets       []string
 	dryRun     bool
 	maxSteps   int
+	limit      int // cases per set, for a cheap smoke run (0 = all)
 }
 
 var assistantTools = []string{
@@ -50,6 +51,7 @@ func main() {
 		sets       = flag.String("sets", "tools,time,advice", "comma-separated: tools,time,advice")
 		dryRun     = flag.Bool("dry-run", false, "print the plan and the estimated number of model calls, call nothing")
 		maxSteps   = flag.Int("max-steps", 5, "tool loop steps per time query")
+		limit      = flag.Int("limit", 0, "run only the first N cases per set (smoke test; 0 = all)")
 	)
 	flag.Parse()
 
@@ -59,6 +61,7 @@ func main() {
 		sets:       splitList(*sets),
 		dryRun:     *dryRun,
 		maxSteps:   *maxSteps,
+		limit:      *limit,
 	}
 	for _, m := range splitList(*models) {
 		cfg.models = append(cfg.models, m)
@@ -100,7 +103,7 @@ func main() {
 		}
 
 		if contains(cfg.sets, "tools") {
-			res, err := runToolSet(client, reg, specs, persona, model, dsn, cfg.runs)
+			res, err := runToolSet(client, reg, specs, persona, model, dsn, cfg.runs, cfg.limit)
 			if err != nil {
 				fmt.Printf("tools: %v\n", err)
 			} else {
@@ -108,7 +111,7 @@ func main() {
 			}
 		}
 		if contains(cfg.sets, "time") {
-			res, err := runTimeSet(client, reg, specs, persona, model, dsn, cfg.runs, cfg.maxSteps)
+			res, err := runTimeSet(client, reg, specs, persona, model, dsn, cfg.runs, cfg.maxSteps, cfg.limit)
 			if err != nil {
 				fmt.Printf("time: %v\n", err)
 			} else {
@@ -116,7 +119,7 @@ func main() {
 			}
 		}
 		if contains(cfg.sets, "advice") {
-			res, err := runAdviceSet(client, reg, specs, persona, model, judge, dsn, cfg.runs, cfg.maxSteps)
+			res, err := runAdviceSet(client, reg, specs, persona, model, judge, dsn, cfg.runs, cfg.maxSteps, cfg.limit)
 			if err != nil {
 				fmt.Printf("advice: %v\n", err)
 			} else {
@@ -163,7 +166,7 @@ type toolResult struct {
 	firstFailure     []string
 }
 
-func runToolSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, persona, model, dsn string, runs int) (toolResult, error) {
+func runToolSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, persona, model, dsn string, runs, limit int) (toolResult, error) {
 	ctx := context.Background()
 	db, cleanup, err := storetest.NewSchema(ctx, dsn)
 	if err != nil {
@@ -184,7 +187,10 @@ func runToolSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, per
 	lookup := func(id int64) (string, bool) { t, ok := seedTitles[id]; return t, ok }
 
 	out := toolResult{perCase: map[string][2]int{}}
-	for _, c := range toolCases {
+	for ci, c := range toolCases {
+		if limit > 0 && ci >= limit {
+			break
+		}
 		for i := 0; i < runs; i++ {
 			resp, err := client.Stream(ctx, llm.Request{
 				Model: model, System: system, Tools: specs, Session: "eval-tools",
@@ -271,7 +277,7 @@ func describeToolFailure(c toolCase, calls []llm.ToolCall) string {
 
 // ---- time queries ---------------------------------------------------------
 
-func runTimeSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, persona, model, dsn string, runs, maxSteps int) (passResult, error) {
+func runTimeSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, persona, model, dsn string, runs, maxSteps, limit int) (passResult, error) {
 	ctx := context.Background()
 	db, cleanup, err := storetest.NewSchema(ctx, dsn)
 	if err != nil {
@@ -288,7 +294,10 @@ func runTimeSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, per
 	}
 
 	out := passResult{perCase: map[string][2]int{}}
-	for _, c := range timeCases {
+	for ci, c := range timeCases {
+		if limit > 0 && ci >= limit {
+			break
+		}
 		for i := 0; i < runs; i++ {
 			answer, _, err := runTurn(ctx, client, model, system, specs, reg, env, c.Question, maxSteps)
 			out.total++
@@ -381,7 +390,7 @@ type passResult struct {
 	firstFailure []string
 }
 
-func runAdviceSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, persona, model, judgeModel, dsn string, runs, maxSteps int) (passResult, error) {
+func runAdviceSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, persona, model, judgeModel, dsn string, runs, maxSteps, limit int) (passResult, error) {
 	ctx := context.Background()
 	out := passResult{perCase: map[string][2]int{}}
 	settings := assistant.Settings{
@@ -389,7 +398,10 @@ func runAdviceSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, p
 		MorningAt: 8 * time.Hour, EveningAt: 21 * time.Hour,
 	}
 
-	for _, c := range adviceCases {
+	for ci, c := range adviceCases {
+		if limit > 0 && ci >= limit {
+			break
+		}
 		for i := 0; i < runs; i++ {
 			// A fresh schema per scenario: the check-in turn may record things.
 			db, cleanup, err := storetest.NewSchema(ctx, dsn)
@@ -407,10 +419,10 @@ func runAdviceSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, p
 			now := c.NowLocal.UTC()
 			day := assistant.LogicalDay(now, evalLoc, settings.DayStartsAt)
 			rec := assistant.LoadRecords(ctx, db, day, settings)
-			cctx := assistant.BuildContext(
-				assistant.Character{ID: "assistant", Name: "Assistant", Persona: persona, Tools: assistantTools, Daily: true},
-				"", nil, 40, now, settings, &rec,
-			)
+			cctx := assistant.BuildContext(assistant.ContextInput{
+				Character: assistant.Character{ID: "assistant", Name: "Assistant", Persona: persona, Tools: assistantTools, Daily: true},
+				Window:    40, Now: now, Settings: settings, Records: &rec,
+			})
 			env := tools.Env{
 				CharacterID: "assistant", Allowed: assistantTools, Now: now,
 				DB: db, Day: day, Loc: settings.Loc,
@@ -531,10 +543,10 @@ func systemPrompt(ctx context.Context, db *store.Store, persona string) string {
 		MorningAt: 8 * time.Hour, EveningAt: 21 * time.Hour,
 	}
 	rec := assistant.LoadRecords(ctx, db, evalDay, settings)
-	return assistant.BuildContext(
-		assistant.Character{ID: "assistant", Name: "Assistant", Persona: persona, Tools: assistantTools, Daily: true},
-		"", nil, 40, evalNow, settings, &rec,
-	).System
+	return assistant.BuildContext(assistant.ContextInput{
+		Character: assistant.Character{ID: "assistant", Name: "Assistant", Persona: persona, Tools: assistantTools, Daily: true},
+		Window:    40, Now: evalNow, Settings: settings, Records: &rec,
+	}).System
 }
 
 func loadAssistantPersona() string {

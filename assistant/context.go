@@ -34,10 +34,25 @@ type Context struct {
 	Window     int
 }
 
+// ContextInput is everything the prompt builder needs. A struct keeps later
+// phases (facts, retrieved hits, summary) from turning the signature into a
+// row of booleans.
+type ContextInput struct {
+	Character Character
+	Memory    string // profile + core facts block
+	History   []store.Message
+	Window    int
+	Now       time.Time
+	Settings  Settings
+	Records   *Records // nil for persona chats
+}
+
 // BuildContext assembles persona, memory, the day's records, the clock and the
 // last window messages. The window is cut at a user turn so tool call/result
-// pairs stay together. rec may be nil (a persona chat has no daily records).
-func BuildContext(char Character, memory string, history []store.Message, window int, now time.Time, set Settings, rec *Records) Context {
+// pairs stay together.
+func BuildContext(in ContextInput) Context {
+	char, memory, history, now, set, rec := in.Character, in.Memory, in.History, in.Now, in.Settings, in.Records
+	window := in.Window
 	if window <= 0 {
 		window = DefaultWindow
 	}

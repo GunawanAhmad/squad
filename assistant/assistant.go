@@ -195,7 +195,10 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 		loaded := LoadRecords(ctx, rs, day, set)
 		records = &loaded
 	}
-	cctx := BuildContext(req.Character, memory, history, r.window, now, set, records)
+	cctx := BuildContext(ContextInput{
+		Character: req.Character, Memory: memory, History: history,
+		Window: r.window, Now: now, Settings: set, Records: records,
+	})
 
 	trace, _ := json.Marshal(contextTrace{
 		Sections:    cctx.Sections,

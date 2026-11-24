@@ -83,6 +83,14 @@ func main() {
 	}
 	defer db.Close()
 
+	// Phase 2: the old memory/<char>.json notes become facts once. The profile
+	// stays a file. Nothing from memory/ is ever printed.
+	if n, err := importMemoryFacts(context.Background(), db, memDir); err != nil {
+		log.Printf("memory: import skipped: %v", err)
+	} else if n > 0 {
+		log.Printf("memory: imported %d facts from %s", n, memDir)
+	}
+
 	backup := newDailyBackup(backupDir)
 	runner := assistant.New(assistant.Config{
 		Store: db,
@@ -96,7 +104,13 @@ func main() {
 			if c, ok := chars[charID]; ok && c.Context == "none" {
 				return ""
 			}
-			return memoryPrompt(Character{ID: charID})
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			facts, err := db.CoreFacts(ctx, 100)
+			if err != nil {
+				log.Printf("memory: reading core facts: %v", err)
+			}
+			return memoryPrompt(readProfile(), facts)
 		},
 		Settings:   func(ctx context.Context) assistant.Settings { return assistant.LoadSettings(ctx, db) },
 		Now:        assistant.Now,

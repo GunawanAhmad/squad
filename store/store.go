@@ -209,7 +209,7 @@ func (s *Store) RecentMessages(ctx context.Context, conversationID string, n int
 		SELECT * FROM (
 			SELECT id, conversation_id, role, content, COALESCE(tool_calls, 'null'::jsonb),
 			       COALESCE(tool_call_id, ''), run_id, created_at, forgotten_at
-			FROM messages WHERE conversation_id = $1
+			FROM messages WHERE conversation_id = $1 AND forgotten_at IS NULL
 			ORDER BY id DESC LIMIT $2
 		) t ORDER BY id`, conversationID, n)
 	if err != nil {

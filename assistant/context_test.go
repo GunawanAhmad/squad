@@ -70,7 +70,10 @@ func TestBuildContextGolden(t *testing.T) {
 			Slipped:    []store.Task{{ID: 6, Title: "old thing", Status: "open", PlannedOn: &earlier}},
 		}},
 	}
-	got := golden(BuildContext(char, memory, history, 5, now, Settings{Loc: loc, DayStartsAt: 4 * time.Hour}, &rec))
+	got := golden(BuildContext(ContextInput{
+		Character: char, Memory: memory, History: history, Window: 5, Now: now,
+		Settings: Settings{Loc: loc, DayStartsAt: 4 * time.Hour}, Records: &rec,
+	}))
 	// Window 5 keeps ids 3..7, which starts on a user turn.
 	if len(got.MessageIDs) != 5 || got.MessageIDs[0] != 3 || got.MessageIDs[4] != 7 {
 		t.Fatalf("windowed ids: %v", got.MessageIDs)
@@ -114,7 +117,10 @@ func TestBuildContextWindow(t *testing.T) {
 		}
 		history = append(history, store.Message{ID: i, Role: role, Content: "m"})
 	}
-	got := BuildContext(char, "", history, DefaultWindow, now, Settings{Loc: loc, DayStartsAt: 4 * time.Hour}, nil)
+	got := BuildContext(ContextInput{
+		Character: char, History: history, Window: DefaultWindow, Now: now,
+		Settings: Settings{Loc: loc, DayStartsAt: 4 * time.Hour},
+	})
 	if len(got.Messages) != DefaultWindow || got.MessageIDs[0] != 461 || got.MessageIDs[len(got.MessageIDs)-1] != 500 {
 		t.Fatalf("window: %d messages, ids %v..%v", len(got.Messages), got.MessageIDs[0], got.MessageIDs[len(got.MessageIDs)-1])
 	}
@@ -129,12 +135,18 @@ func TestBuildContextWindow(t *testing.T) {
 		{ID: 2, Role: "assistant", ToolCalls: json.RawMessage(`[{"id":"c","name":"t","arguments":"{}"}]`)},
 		{ID: 3, Role: "tool", ToolCallID: "c", Content: "r"},
 	}
-	if got := BuildContext(char, "", pair, 2, now, Settings{Loc: loc, DayStartsAt: 4 * time.Hour}, nil); len(got.Messages) != 0 {
+	if got := BuildContext(ContextInput{
+		Character: char, History: pair, Window: 2, Now: now,
+		Settings: Settings{Loc: loc, DayStartsAt: 4 * time.Hour},
+	}); len(got.Messages) != 0 {
 		t.Fatalf("dangling tool pair kept: %+v", got.Messages)
 	}
 
 	// No history means no history section.
-	empty := BuildContext(char, "", nil, 10, now, Settings{Loc: loc, DayStartsAt: 4 * time.Hour}, nil)
+	empty := BuildContext(ContextInput{
+		Character: char, Window: 10, Now: now,
+		Settings: Settings{Loc: loc, DayStartsAt: 4 * time.Hour},
+	})
 	for _, s := range empty.Sections {
 		if s == "history" {
 			t.Fatalf("empty history section: %v", empty.Sections)
@@ -147,11 +159,17 @@ func TestBuildContextMemorySection(t *testing.T) {
 	now := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
 	char := Character{ID: "c", Persona: "persona"}
 
-	withMemory := BuildContext(char, "<memory>x</memory>", nil, 10, now, Settings{Loc: loc, DayStartsAt: 4 * time.Hour}, nil)
+	withMemory := BuildContext(ContextInput{
+		Character: char, Memory: "<memory>x</memory>", Window: 10, Now: now,
+		Settings: Settings{Loc: loc, DayStartsAt: 4 * time.Hour},
+	})
 	if !containsSection(withMemory.Sections, "memory") || !containsSection(withMemory.Sections, "persona") {
 		t.Fatalf("sections: %v", withMemory.Sections)
 	}
-	without := BuildContext(char, "  ", nil, 10, now, Settings{Loc: loc, DayStartsAt: 4 * time.Hour}, nil)
+	without := BuildContext(ContextInput{
+		Character: char, Memory: "  ", Window: 10, Now: now,
+		Settings: Settings{Loc: loc, DayStartsAt: 4 * time.Hour},
+	})
 	if containsSection(without.Sections, "memory") {
 		t.Fatalf("empty memory section: %v", without.Sections)
 	}
