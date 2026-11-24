@@ -1,0 +1,84 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"strings"
+	"testing"
+
+	"characters/tools"
+)
+
+func loadCharacters(t *testing.T) []Character {
+	t.Helper()
+	raw, err := os.ReadFile("characters.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list []Character
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatal(err)
+	}
+	return list
+}
+
+func TestCharactersConfigIsValid(t *testing.T) {
+	list := loadCharacters(t)
+	if err := validateCharacters(list, tools.New()); err != nil {
+		t.Fatalf("characters.json: %v", err)
+	}
+
+	var assistant *Character
+	for i := range list {
+		if list[i].ID == assistantCharacterID {
+			assistant = &list[i]
+		}
+	}
+	if assistant == nil {
+		t.Fatal("no assistant character")
+	}
+	for _, tool := range assistant.Tools {
+		if tool == "web_search" || tool == "fetch_url" {
+			t.Fatalf("assistant has a web tool: %s", tool)
+		}
+	}
+	for _, c := range list {
+		if c.ID != assistantCharacterID && len(c.Tools) == 0 {
+			t.Fatalf("%s has no tools", c.ID)
+		}
+	}
+}
+
+func TestCharactersConfigRejectsBadTools(t *testing.T) {
+	base := func() []Character {
+		return []Character{
+			{ID: "assistant", Name: "A", Model: "m", Tools: []string{"plan_tasks"}},
+			{ID: "ria", Name: "R", Model: "m", Tools: []string{"web_search"}},
+		}
+	}
+	if err := validateCharacters(base(), tools.New()); err != nil {
+		t.Fatalf("baseline should pass: %v", err)
+	}
+
+	cases := map[string]func([]Character){
+		"assistant web tool":  func(l []Character) { l[0].Tools = append(l[0].Tools, "web_search") },
+		"persona domain tool": func(l []Character) { l[1].Tools = append(l[1].Tools, "plan_tasks") },
+		"unknown tool":        func(l []Character) { l[1].Tools = []string{"nope"} },
+		"bad context":         func(l []Character) { l[1].Context = "everything" },
+		"missing default":     func(l []Character) { l[1].Models = []string{"other"} },
+		"duplicate id":        func(l []Character) { l[1].ID = "assistant" },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			list := base()
+			mutate(list)
+			err := validateCharacters(list, tools.New())
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if name == "unknown tool" && !strings.Contains(err.Error(), "unknown tool") {
+				t.Fatalf("error: %v", err)
+			}
+		})
+	}
+}

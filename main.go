@@ -5,6 +5,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -31,7 +32,18 @@ type Character struct {
 	Model    string          `json:"model"`
 	Models   []string        `json:"models"` // optional picker choices (see choice); must include the default
 	Tools    []string        `json:"tools"`
+	// Context is how much of the private memory block this character may see:
+	// "profile" (default) or "none". Phase 2 adds the assistant's own facts here.
+	Context string `json:"context"`
 }
+
+// The assistant is the one character with daily threads and domain tools.
+const assistantCharacterID = "assistant"
+
+// webTools are the only tools that read the outside world. D3: the assistant
+// gets none of them (no page content can plant memories), and the personas get
+// only these (they must not write the user's day).
+var webTools = []string{"web_search", "fetch_url"}
 
 var sessionIDRe = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 
@@ -58,15 +70,10 @@ func main() {
 	}
 	chars := map[string]Character{}
 	for _, c := range list {
-		for _, t := range c.Tools {
-			if !toolRegistry.Has(t) {
-				log.Fatalf("character %q: unknown tool %q", c.ID, t)
-			}
-		}
-		if len(c.Models) > 0 && !slices.Contains(c.Models, choice(c.Provider, c.Model)) {
-			log.Fatalf("character %q: models must include %q", c.ID, choice(c.Provider, c.Model))
-		}
 		chars[c.ID] = c
+	}
+	if err := validateCharacters(list, toolRegistry); err != nil {
+		log.Fatal(err)
 	}
 
 	db, err := store.Open(context.Background(), dsn)
@@ -83,7 +90,14 @@ func main() {
 			string(llm.OpenCodeProvider): openCodeModel(),
 			string(llm.ClaudeProvider):   claudeModel(),
 		},
-		Memory:     func(charID string) string { return memoryPrompt(Character{ID: charID}) },
+		DB: db,
+		Memory: func(charID string) string {
+			if c, ok := chars[charID]; ok && c.Context == "none" {
+				return ""
+			}
+			return memoryPrompt(Character{ID: charID})
+		},
+		Settings:   func(ctx context.Context) assistant.Settings { return assistant.LoadSettings(ctx, db) },
 		Now:        assistant.Now,
 		Location:   assistant.TimeZone(),
 		BeforeTurn: func(ctx context.Context) { backup.Maybe(ctx, assistant.Now()) },
@@ -102,6 +116,42 @@ func main() {
 	addr := envOr("ADDR", "127.0.0.1:8080") // localhost only: there is no auth, anyone who can reach it spends your quota
 	log.Printf("listening on http://%s", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
+}
+
+// validateCharacters keeps the config honest at startup: known tools, the
+// assistant's no-web-tools rule (D3), personas that cannot write the user's day,
+// a valid context setting, and a picker that includes the default model.
+func validateCharacters(list []Character, reg *tools.Registry) error {
+	seen := map[string]bool{}
+	for _, c := range list {
+		if c.ID == "" || c.Name == "" {
+			return fmt.Errorf("character %q: id and name are required", c.ID)
+		}
+		if seen[c.ID] {
+			return fmt.Errorf("character %q: duplicate id", c.ID)
+		}
+		seen[c.ID] = true
+		for _, t := range c.Tools {
+			if !reg.Has(t) {
+				return fmt.Errorf("character %q: unknown tool %q", c.ID, t)
+			}
+			if c.ID == assistantCharacterID && slices.Contains(webTools, t) {
+				return fmt.Errorf("character %q: the assistant must not have web tool %q (D3)", c.ID, t)
+			}
+			if c.ID != assistantCharacterID && !slices.Contains(webTools, t) {
+				return fmt.Errorf("character %q: personas get no domain tool %q", c.ID, t)
+			}
+		}
+		switch c.Context {
+		case "", "profile", "none":
+		default:
+			return fmt.Errorf("character %q: context must be profile or none, not %q", c.ID, c.Context)
+		}
+		if len(c.Models) > 0 && !slices.Contains(c.Models, choice(c.Provider, c.Model)) {
+			return fmt.Errorf("character %q: models must include %q", c.ID, choice(c.Provider, c.Model))
+		}
+	}
+	return nil
 }
 
 // choice is how a provider+model pair appears in the picker: "claude/opus", or a bare opencode model name.

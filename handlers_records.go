@@ -18,7 +18,7 @@ import (
 // the model may not write is a date the panel may not write either.
 
 func (s *server) handleListTasks(w http.ResponseWriter, r *http.Request) {
-	settings := assistant.LoadSettings(r.Context(), s.records)
+	settings := s.settings(r.Context())
 	now := s.clock()
 	day := assistant.LogicalDay(now, settings.Loc, settings.DayStartsAt)
 
@@ -75,7 +75,7 @@ func (s *server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	settings := assistant.LoadSettings(r.Context(), s.records)
+	settings := s.settings(r.Context())
 	now := s.clock()
 	day := assistant.LogicalDay(now, settings.Loc, settings.DayStartsAt)
 
@@ -100,7 +100,7 @@ func (s *server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleListActivities(w http.ResponseWriter, r *http.Request) {
-	settings := assistant.LoadSettings(r.Context(), s.records)
+	settings := s.settings(r.Context())
 	now := s.clock()
 	day := assistant.LogicalDay(now, settings.Loc, settings.DayStartsAt)
 
@@ -148,7 +148,7 @@ func (s *server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 		recordError(w, err)
 		return
 	}
-	settings := assistant.LoadSettings(r.Context(), s.records)
+	settings := s.settings(r.Context())
 	day := assistant.LogicalDay(s.clock(), settings.Loc, settings.DayStartsAt)
 	if patch.Description != nil {
 		if strings.TrimSpace(*patch.Description) == "" || len(*patch.Description) > 2000 {
@@ -212,7 +212,7 @@ func (s *server) handleListReminders(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "list reminders", err)
 		return
 	}
-	settings := assistant.LoadSettings(r.Context(), s.records)
+	settings := s.settings(r.Context())
 	out := make([]map[string]any, 0, len(reminders))
 	for _, rem := range reminders {
 		out = append(out, reminderJSON(rem, settings.Loc))
@@ -240,7 +240,7 @@ func (s *server) handlePatchReminder(w http.ResponseWriter, r *http.Request) {
 		recordError(w, err)
 		return
 	}
-	settings := assistant.LoadSettings(r.Context(), s.records)
+	settings := s.settings(r.Context())
 	now := s.clock()
 	if patch.Text != nil {
 		text := strings.TrimSpace(*patch.Text)
@@ -295,7 +295,7 @@ func (s *server) handleDeleteReminder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, settingsJSON(assistant.LoadSettings(r.Context(), s.records)))
+	writeJSON(w, http.StatusOK, settingsJSON(s.settings(r.Context())))
 }
 
 func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
@@ -343,7 +343,7 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "save settings", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, settingsJSON(assistant.LoadSettings(r.Context(), s.records)))
+	writeJSON(w, http.StatusOK, settingsJSON(s.settings(r.Context())))
 }
 
 // handleUndo is the Today panel's undo: the same ApplyUndo the chat's undo tool

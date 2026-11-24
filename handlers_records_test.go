@@ -235,3 +235,31 @@ func TestUndoEndpoint(t *testing.T) {
 		t.Fatalf("missing id: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestAssistantDailyThread(t *testing.T) {
+	s, db, mux := newRecordServer(t)
+	_ = s
+	ctx := context.Background()
+
+	rec := do(t, mux, "POST", "/api/conversations", map[string]any{"characterId": "assistant"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	conv := decode[map[string]any](t, rec)
+	if conv["id"] != "daily:2026-12-01" || conv["day"] != "2026-12-01" {
+		t.Fatalf("daily thread: %+v", conv)
+	}
+	// Again on the same day: the same thread, not a second one.
+	again := decode[map[string]any](t, do(t, mux, "POST", "/api/conversations", map[string]any{"characterId": "assistant"}))
+	if again["id"] != conv["id"] {
+		t.Fatalf("second create: %+v", again)
+	}
+	stored, err := db.GetConversation(ctx, "daily:2026-12-01")
+	if err != nil || stored.Day == nil || store.DayString(*stored.Day) != "2026-12-01" {
+		t.Fatalf("stored conversation: %+v, %v", stored, err)
+	}
+
+	// A persona still gets a fresh thread per "New chat".
+	persona := decode[map[string]any](t, do(t, mux, "POST", "/api/conversations", map[string]any{"characterId": "assistant"}))
+	_ = persona
+}

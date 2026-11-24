@@ -39,6 +39,23 @@ type server struct {
 	now     func() time.Time // injectable clock for tests
 }
 
+// settings is settings.tz and the day boundary; records is nil in tests.
+func (s *server) settings(ctx context.Context) assistant.Settings {
+	if s.records == nil {
+		return assistant.DefaultSettings()
+	}
+	return assistant.LoadSettings(ctx, s.records)
+}
+
+// dailyConversation opens (or creates) the thread for the current logical day.
+func (s *server) dailyConversation(ctx context.Context) (store.Conversation, error) {
+	set := s.settings(ctx)
+	day := assistant.LogicalDay(s.clock(), set.Loc, set.DayStartsAt)
+	return s.db.CreateConversation(ctx, store.Conversation{
+		ID: "daily:" + store.DayString(day), CharacterID: assistantCharacterID, Day: &day,
+	})
+}
+
 // clock is the server's wall clock (assistant.Now in production).
 func (s *server) clock() time.Time {
 	if s.now != nil {
@@ -89,6 +106,16 @@ func (s *server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 	}
 	if _, ok := s.chars[req.CharacterID]; !ok {
 		http.Error(w, "unknown character", http.StatusBadRequest)
+		return
+	}
+	// The assistant has one thread per day (D5); "new chat" means today's.
+	if req.CharacterID == assistantCharacterID {
+		conv, err := s.dailyConversation(r.Context())
+		if err != nil {
+			serverError(w, "open today's thread", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, conversationJSON(conv))
 		return
 	}
 
