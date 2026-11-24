@@ -56,6 +56,7 @@ func New() *Registry {
 	for _, t := range []*Tool{
 		webSearchTool(), fetchURLTool(),
 		planTasksTool(), updateTaskTool(), completeTaskTool(), listTasksTool(),
+		logActivityTool(), queryActivitiesTool(),
 	} {
 		r.tools[t.Name] = t
 	}
