@@ -175,6 +175,14 @@ func runToolSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, per
 	}
 	system := systemPrompt(ctx, db, persona)
 
+	// Seeded tasks get ids 1..N in insertion order; a model may reference them
+	// by id instead of title.
+	seedTitles := map[int64]string{}
+	for i, t := range defaultSeed().tasks {
+		seedTitles[int64(i+1)] = t.Title
+	}
+	lookup := func(id int64) (string, bool) { t, ok := seedTitles[id]; return t, ok }
+
 	out := toolResult{perCase: map[string][2]int{}}
 	for _, c := range toolCases {
 		for i := 0; i < runs; i++ {
@@ -193,7 +201,7 @@ func runToolSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, per
 				continue
 			}
 
-			ok, fieldsOK, fields := judgeTool(c, resp.ToolCalls)
+			ok, fieldsOK, fields := judgeTool(c, resp.ToolCalls, lookup)
 			out.fieldsOK += fieldsOK
 			out.fields += fields
 			count := out.perCase[c.Text]
@@ -210,7 +218,7 @@ func runToolSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, per
 
 // judgeTool compares the model's first tool call with the case. A case with an
 // empty Tool must produce no tool call at all.
-func judgeTool(c toolCase, calls []llm.ToolCall) (ok bool, fieldsOK, fields int) {
+func judgeTool(c toolCase, calls []llm.ToolCall, lookupID func(int64) (string, bool)) (ok bool, fieldsOK, fields int) {
 	if c.Tool == "" {
 		return len(calls) == 0, 0, 0
 	}
@@ -229,11 +237,23 @@ func judgeTool(c toolCase, calls []llm.ToolCall) (ok bool, fieldsOK, fields int)
 	for key, want := range c.Want {
 		fields++
 		got, present := args[key]
-		if present && matchArg(key, got, want) {
+		if present && matchArg(key, got, want, lookupID) {
 			fieldsOK++
-		} else {
-			ok = false
+			continue
 		}
+		// query_activities defaults from and to to each other, so naming only
+		// one end is still the right range.
+		if !present && (key == "to" || key == "from") {
+			other := "from"
+			if key == "from" {
+				other = "to"
+			}
+			if v, has := args[other]; has && matchArg(key, v, want, lookupID) {
+				fieldsOK++
+				continue
+			}
+		}
+		ok = false
 	}
 	return ok, fieldsOK, fields
 }

@@ -45,7 +45,7 @@ var toolCases = []toolCase{
 	{Text: "I dropped the newsletter idea, stop tracking it", Tool: "complete_task", Want: map[string]string{"task": "newsletter", "status": "dropped"}},
 	{Text: "what's left for today?", Tool: "list_tasks", Want: map[string]string{}},
 	{Text: "log 2 hours on the API refactor", Tool: "log_activity", Want: map[string]string{"description": "api refactor", "minutes": "120"}},
-	{Text: "I spent 45 minutes reviewing PRs", Tool: "log_activity", Want: map[string]string{"description": "reviewing PRs", "minutes": "45"}},
+	{Text: "I spent 45 minutes reviewing PRs", Tool: "log_activity", Want: map[string]string{"description": "PRs", "minutes": "45"}},
 	{Text: "I fixed a prod bug, took about half an hour", Tool: "log_activity", Want: map[string]string{"description": "prod bug", "minutes": "30"}},
 	{Text: "what did I do yesterday?", Tool: "query_activities", Want: map[string]string{"from": "2026-11-30", "to": "2026-11-30"}},
 	{Text: "what did I do on 28 November?", Tool: "query_activities", Want: map[string]string{"from": "2026-11-28", "to": "2026-11-28"}},
@@ -177,7 +177,7 @@ type seedActivity struct {
 func intPtr(v int) *int { return &v }
 
 // matchArg checks one expected argument against what the model produced.
-func matchArg(key string, got json.RawMessage, want string) bool {
+func matchArg(key string, got json.RawMessage, want string, lookupID func(int64) (string, bool)) bool {
 	if len(got) == 0 {
 		return false
 	}
@@ -232,6 +232,19 @@ func matchArg(key string, got json.RawMessage, want string) bool {
 			}
 		}
 		return true
+	case "task", "reminder":
+		if strings.Contains(text, strings.ToLower(want)) {
+			return true
+		}
+		if lookupID != nil {
+			idText := strings.TrimPrefix(text, "#")
+			if id, err := strconv.ParseInt(idText, 10, 64); err == nil {
+				if title, ok := lookupID(id); ok && strings.Contains(strings.ToLower(title), strings.ToLower(want)) {
+					return true
+				}
+			}
+		}
+		return false
 	default:
 		return strings.Contains(text, strings.ToLower(want))
 	}

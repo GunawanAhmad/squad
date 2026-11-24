@@ -500,3 +500,23 @@ Numbers measured on this machine with the Compose Postgres and the real routes, 
 - **OpenCode gateway usage while streaming:** yes. A streamed turn recorded `input_tokens=698, output_tokens=30` in `runs` without `stream_options.include_usage`; the gateway sends a usage chunk on its own.
 - **`claude -p` with the empty `cmd.Env`:** still authenticates. A turn through `runClaude` completed in 2.8 s and recorded `input_tokens=2, output_tokens=47`. The date/time answer was correct on both routes (Asia/Makassar, UTC+8).
 - **Backup/restore:** `pg_dump -Fc` produced a 10,524-byte dump of the Phase 0 database. `pg_restore` into an empty scratch database succeeded without `-` as a filename argument (it reads stdin), and the app started on the scratch database and served the restored messages and runs.
+
+## Verified during Phase 1 (2026-11-25)
+
+Model evals run with `eval/` (3 runs per case, fixed clock Tuesday 1 December 2026, 09:00 Asia/Makassar; the no-advice set judged by `claude-haiku-5-5`). Numbers are pass counts, not estimates.
+
+| Model | Tool calls | Fields | Time queries | No advice |
+|---|---|---|---|---|
+| **claude-haiku-5-5** (chosen) | **111/117 (94.9%)** | **147/153 (96.1%)** | 35/36 (97.2%) | 30/30 |
+| deepseek-v4-pro | 102/117 (87.2%) ¹ | 135/153 (88.2%) | 35/36 (97.2%) | 30/30 |
+| deepseek-v4.1-flash | 79/120 (65.8%) ² | 110/153 (71.9%) | stopped ³ | stopped ³ |
+
+¹ Near-final harness: one `from`/`to` false negative per run (the tool defaults `to` to `from`), so the true score is at least 87.2%.
+² Measured before the tool-routing fix; not re-run because it was clearly behind.
+³ The run was stopped after the tool gate failed; this model was not selected.
+
+**The first pass failed the gate** (best 76.7%): models picked `list_tasks` where they should plan or complete, recorded maybes ("I might go to the gym"), and passed Indonesian relative dates (`besok`) that `ParseDay` rejected. Fixes: explicit tool routing in the assistant persona, "a maybe is not a plan", `minutes` states the hours→minutes conversion, and `ParseDay` accepts `hari ini` / `besok` / `kemarin` / `lusa`. After the fixes haiku reached 94.9%.
+
+The tool set has 39 cases (117 runs): the standalone "undo the last thing you recorded" case was dropped because nothing had been recorded in that fresh conversation, so not calling a tool was correct.
+
+`claude-haiku-5-5` is now the `assistant` default (check-ins and background jobs use it until `settings.jobs_model` is set).

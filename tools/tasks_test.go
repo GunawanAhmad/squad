@@ -220,3 +220,19 @@ func TestParseDayWeekdays(t *testing.T) {
 		t.Fatalf("bad day: %v", err)
 	}
 }
+
+func TestParseDayIndonesian(t *testing.T) {
+	base := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
+	cases := map[string]time.Time{
+		"hari ini": base,
+		"besok":    base.AddDate(0, 0, 1),
+		"kemarin":  base.AddDate(0, 0, -1),
+		"lusa":     base.AddDate(0, 0, 2),
+	}
+	for in, want := range cases {
+		got, err := tools.ParseDay(in, base)
+		if err != nil || !got.Equal(want) {
+			t.Fatalf("ParseDay(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+}

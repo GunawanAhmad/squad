@@ -63,12 +63,14 @@ func ParseDay(raw string, base time.Time) (time.Time, error) {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	base = store.Day(base)
 	switch s {
-	case "today":
+	case "today", "hari ini":
 		return base, nil
-	case "tomorrow":
+	case "tomorrow", "besok":
 		return base.AddDate(0, 0, 1), nil
-	case "yesterday":
+	case "yesterday", "kemarin":
 		return base.AddDate(0, 0, -1), nil
+	case "lusa":
+		return base.AddDate(0, 0, 2), nil
 	}
 	if wd, ok := weekdayNames[s]; ok {
 		for d := base.AddDate(0, 0, 1); ; d = d.AddDate(0, 0, 1) {

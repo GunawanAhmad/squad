@@ -21,7 +21,7 @@ func logActivityTool() *Tool {
 			"type": "object",
 			"properties": map[string]any{
 				"description": map[string]any{"type": "string"},
-				"minutes":     map[string]any{"type": "integer", "description": "1-1440, only if the user said it"},
+				"minutes":     map[string]any{"type": "integer", "description": "1-1440 in minutes, only if the user said it; convert: 2 hours -> 120"},
 				"day":         map[string]any{"type": "string", "description": "YYYY-MM-DD, today or yesterday"},
 				"project":     map[string]any{"type": "string"},
 				"task":        map[string]any{"type": "string", "description": "optional task id or title"},
