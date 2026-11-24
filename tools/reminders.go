@@ -149,7 +149,7 @@ func cancelReminderTool() *Tool {
 				Text: "cancelled: " + ReminderLine(updated, env.Loc),
 				Undo: []UndoOp{{
 					Op: "restore_reminder", ReminderID: before.ID,
-					ExpectStatus: before.Status, PreviousRemind: mustJSON(before),
+					ExpectStatus: updated.Status, PreviousRemind: mustJSON(before),
 				}},
 			}, nil
 		},

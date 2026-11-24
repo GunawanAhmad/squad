@@ -462,9 +462,13 @@ func encodeUndo(op UndoOp) []byte {
 	return raw
 }
 
-// ApplyUndo reverses one stored write. It never silently overwrites: when the
-// record moved on since the write, it returns ErrConflict with what changed.
-func ApplyUndo(ctx context.Context, db *store.Store, toolCallID int64, now time.Time, loc *time.Location) (string, error) {
+// ApplyUndo reverses one stored write. A tool call may have recorded several
+// inverse operations (plan_tasks records one per task); targetKind/ID restrict
+// undo to a single record, which is what the Today panel asks for, and an empty
+// target undoes the whole call, which is what the chat's undo tool does.
+// It never silently overwrites: when a record moved on since the write, it
+// refuses with ErrConflict and says what changed.
+func ApplyUndo(ctx context.Context, db *store.Store, toolCallID int64, targetKind string, targetID int64) (string, error) {
 	tc, err := db.GetToolCall(ctx, toolCallID)
 	if err != nil {
 		return "", err
@@ -475,55 +479,116 @@ func ApplyUndo(ctx context.Context, db *store.Store, toolCallID int64, now time.
 	if tc.Status != "ok" {
 		return "", fmt.Errorf("%w: tool call #%d did not succeed, nothing to undo", ErrConflict, toolCallID)
 	}
-	var op UndoOp
+	var ops []UndoOp
 	if len(tc.Undo) == 0 || string(tc.Undo) == "null" {
 		return "", fmt.Errorf("%w: tool call #%d changed nothing", ErrConflict, toolCallID)
 	}
-	if err := json.Unmarshal(tc.Undo, &op); err != nil {
+	if err := json.Unmarshal(tc.Undo, &ops); err != nil {
 		return "", fmt.Errorf("tool call %d: bad undo record: %w", toolCallID, err)
 	}
 
-	var summary string
+	selected := ops
+	if targetKind != "" {
+		selected = nil
+		for _, op := range ops {
+			kind, id := op.target()
+			if kind == targetKind && (targetID == 0 || id == targetID) {
+				selected = append(selected, op)
+			}
+		}
+		if len(selected) == 0 {
+			return "", fmt.Errorf("%w: tool call #%d did not write that %s", ErrConflict, toolCallID, targetKind)
+		}
+	}
+
+	var summaries []string
+	remaining := append([]UndoOp(nil), ops...)
+	for _, op := range selected {
+		summary, err := applyUndoOp(ctx, db, op)
+		if err != nil {
+			return "", err
+		}
+		summaries = append(summaries, summary)
+		remaining = removeOp(remaining, op)
+	}
+	if len(remaining) == 0 {
+		if err := db.SetToolCallStatus(ctx, toolCallID, "undone"); err != nil {
+			return "", err
+		}
+	} else {
+		raw, _ := json.Marshal(remaining)
+		if err := db.FinishToolCall(ctx, toolCallID, tc.Result, raw, "ok"); err != nil {
+			return "", err
+		}
+	}
+	return strings.Join(summaries, "; "), nil
+}
+
+func (op UndoOp) target() (string, int64) {
+	switch op.Op {
+	case "delete_task", "restore_task":
+		return "task", op.TaskID
+	case "delete_activity":
+		return "activity", op.ActivityID
+	case "cancel_reminder", "restore_reminder":
+		return "reminder", op.ReminderID
+	case "unskip_checkin":
+		return "checkin", 0
+	}
+	return "", 0
+}
+
+func removeOp(ops []UndoOp, op UndoOp) []UndoOp {
+	for i, o := range ops {
+		if o.Op == op.Op && o.TaskID == op.TaskID && o.ActivityID == op.ActivityID &&
+			o.ReminderID == op.ReminderID && o.CheckinDay == op.CheckinDay && o.CheckinKind == op.CheckinKind {
+			return append(append([]UndoOp(nil), ops[:i]...), ops[i+1:]...)
+		}
+	}
+	return ops
+}
+
+func applyUndoOp(ctx context.Context, db *store.Store, op UndoOp) (string, error) {
 	switch op.Op {
 	case "delete_task":
 		t, err := db.GetTask(ctx, op.TaskID)
 		if err != nil {
 			return "", fmt.Errorf("%w: task #%d is already gone", ErrConflict, op.TaskID)
 		}
-		if err := expectTaskState(t, op, now); err != nil {
+		if err := expectTaskState(t, op); err != nil {
 			return "", err
 		}
 		if err := db.DeleteTask(ctx, op.TaskID); err != nil {
 			return "", err
 		}
-		summary = fmt.Sprintf("removed plan #%d %q", t.ID, t.Title)
+		return fmt.Sprintf("removed plan #%d %q", t.ID, t.Title), nil
 
 	case "restore_task":
 		var prev store.Task
 		if err := json.Unmarshal(op.PreviousTask, &prev); err != nil {
-			return "", fmt.Errorf("tool call %d: bad task snapshot: %w", toolCallID, err)
+			return "", fmt.Errorf("bad task snapshot: %w", err)
 		}
 		t, err := db.GetTask(ctx, prev.ID)
 		if err != nil {
 			return "", fmt.Errorf("%w: task #%d is already gone", ErrConflict, prev.ID)
 		}
-		if err := expectTaskState(t, op, now); err != nil {
+		if err := expectTaskState(t, op); err != nil {
 			return "", err
 		}
 		if _, err := db.UpdateTask(ctx, prev); err != nil {
 			return "", err
 		}
-		summary = fmt.Sprintf("restored plan #%d %q (%s)", prev.ID, prev.Title, prev.Status)
+		return fmt.Sprintf("restored plan #%d %q (%s)", prev.ID, prev.Title, prev.Status), nil
 
 	case "delete_activity":
 		a, err := db.GetActivity(ctx, op.ActivityID)
 		if err != nil {
-			return "", fmt.Errorf("%w: activity #%d is already gone", ErrConflict, op.ActivityID)
+			return "", fmt.Errorf("%w: logged item #%d is already gone", ErrConflict, op.ActivityID)
 		}
 		if err := db.DeleteActivity(ctx, op.ActivityID); err != nil {
 			return "", err
 		}
-		summary = fmt.Sprintf("removed log entry #%d %q", a.ID, a.Description)
+		return fmt.Sprintf("removed log entry #%d %q", a.ID, a.Description), nil
 
 	case "cancel_reminder":
 		r, err := db.GetReminder(ctx, op.ReminderID)
@@ -536,25 +601,29 @@ func ApplyUndo(ctx context.Context, db *store.Store, toolCallID int64, now time.
 		if err := db.DeleteReminder(ctx, r.ID); err != nil {
 			return "", err
 		}
-		summary = fmt.Sprintf("removed reminder #%d %q", r.ID, r.Text)
+		return fmt.Sprintf("removed reminder #%d %q", r.ID, r.Text), nil
 
 	case "restore_reminder":
 		var prev store.Reminder
 		if err := json.Unmarshal(op.PreviousRemind, &prev); err != nil {
-			return "", fmt.Errorf("tool call %d: bad reminder snapshot: %w", toolCallID, err)
+			return "", fmt.Errorf("bad reminder snapshot: %w", err)
 		}
-		if _, err := db.GetReminder(ctx, prev.ID); err != nil {
+		current, err := db.GetReminder(ctx, prev.ID)
+		if err != nil {
 			return "", fmt.Errorf("%w: reminder #%d is already gone", ErrConflict, prev.ID)
+		}
+		if op.ExpectStatus != "" && current.Status != op.ExpectStatus {
+			return "", fmt.Errorf("%w: reminder #%d is %s now, not %s; not undoing", ErrConflict, current.ID, current.Status, op.ExpectStatus)
 		}
 		if _, err := db.UpdateReminder(ctx, prev); err != nil {
 			return "", err
 		}
-		summary = fmt.Sprintf("restored reminder #%d %q", prev.ID, prev.Text)
+		return fmt.Sprintf("restored reminder #%d %q", prev.ID, prev.Text), nil
 
 	case "unskip_checkin":
 		day, err := time.Parse("2006-01-02", op.CheckinDay)
 		if err != nil {
-			return "", fmt.Errorf("tool call %d: bad check-in day: %w", toolCallID, err)
+			return "", fmt.Errorf("bad check-in day: %w", err)
 		}
 		c, err := db.Checkin(ctx, day, op.CheckinKind)
 		if err != nil || c.Status != "skipped" {
@@ -563,19 +632,12 @@ func ApplyUndo(ctx context.Context, db *store.Store, toolCallID int64, now time.
 		if err := db.DeleteCheckin(ctx, day, op.CheckinKind); err != nil {
 			return "", err
 		}
-		summary = fmt.Sprintf("re-enabled the %s check-in on %s", op.CheckinKind, op.CheckinDay)
-
-	default:
-		return "", fmt.Errorf("%w: unknown undo operation %q", ErrConflict, op.Op)
+		return fmt.Sprintf("re-enabled the %s check-in on %s", op.CheckinKind, op.CheckinDay), nil
 	}
-
-	if err := db.SetToolCallStatus(ctx, toolCallID, "undone"); err != nil {
-		return "", err
-	}
-	return summary, nil
+	return "", fmt.Errorf("%w: unknown undo operation %q", ErrConflict, op.Op)
 }
 
-func expectTaskState(t store.Task, op UndoOp, now time.Time) error {
+func expectTaskState(t store.Task, op UndoOp) error {
 	if op.ExpectUpdated == "" {
 		return nil
 	}

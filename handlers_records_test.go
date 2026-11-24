@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -192,3 +193,45 @@ func TestRecordsSettingsAPI(t *testing.T) {
 }
 
 func itoa(id int64) string { return strconv.FormatInt(id, 10) }
+
+func TestUndoEndpoint(t *testing.T) {
+	_, db, mux := newRecordServer(t)
+	ctx := context.Background()
+	settings := assistant.DefaultSettings()
+	day := assistant.LogicalDay(testNow, settings.Loc, settings.DayStartsAt)
+
+	if _, err := db.CreateConversation(ctx, store.Conversation{ID: "daily:2026-12-01", CharacterID: "assistant"}); err != nil {
+		t.Fatal(err)
+	}
+	conv := "daily:2026-12-01"
+	runID, err := db.StartRun(ctx, store.Run{Kind: "turn", ConversationID: &conv, Model: "fake", Status: "ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := db.StartToolCall(ctx, store.ToolCall{RunID: runID, Name: "plan_tasks", Args: []byte("{}")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := tools.CreateTask(ctx, db, "write the tests", "", "", "", day, &call.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	undo, _ := json.Marshal([]tools.UndoOp{{Op: "delete_task", TaskID: task.ID, ExpectUpdated: task.UpdatedAt.Format(time.RFC3339Nano)}})
+	if err := db.FinishToolCall(ctx, call.ID, "planned 1", undo, "ok"); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(t, mux, "POST", "/api/assistant/undo", map[string]any{"toolCallId": call.ID, "kind": "task", "id": task.ID})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "removed plan") {
+		t.Fatalf("undo: %d %s", rec.Code, rec.Body.String())
+	}
+	if left, _ := db.Tasks(ctx, store.TaskFilter{}); len(left) != 0 {
+		t.Fatalf("task not undone: %+v", left)
+	}
+	if rec := do(t, mux, "POST", "/api/assistant/undo", map[string]any{"toolCallId": call.ID, "kind": "task", "id": task.ID}); rec.Code != http.StatusConflict {
+		t.Fatalf("second undo: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, mux, "POST", "/api/assistant/undo", map[string]any{}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing id: %d %s", rec.Code, rec.Body.String())
+	}
+}

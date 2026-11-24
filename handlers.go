@@ -66,6 +66,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/assistant/reminders/{id}", s.handleDeleteReminder)
 	mux.HandleFunc("GET /api/assistant/settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /api/assistant/settings", s.handlePutSettings)
+	mux.HandleFunc("POST /api/assistant/undo", s.handleUndo)
 }
 
 func (s *server) handleCharacters(w http.ResponseWriter, _ *http.Request) {

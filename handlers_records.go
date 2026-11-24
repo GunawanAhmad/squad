@@ -346,6 +346,36 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, settingsJSON(assistant.LoadSettings(r.Context(), s.records)))
 }
 
+// handleUndo is the Today panel's undo: the same ApplyUndo the chat's undo tool
+// uses, restricted to the record whose button was pressed.
+func (s *server) handleUndo(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ToolCallID int64  `json:"toolCallId"`
+		Kind       string `json:"kind"`
+		ID         int64  `json:"id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if req.ToolCallID <= 0 {
+		http.Error(w, "toolCallId is required", http.StatusBadRequest)
+		return
+	}
+	switch req.Kind {
+	case "", "task", "activity", "reminder", "checkin":
+	default:
+		http.Error(w, "bad kind", http.StatusBadRequest)
+		return
+	}
+	summary, err := tools.ApplyUndo(r.Context(), s.records, req.ToolCallID, req.Kind, req.ID)
+	if err != nil {
+		recordError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"undone": summary})
+}
+
 func settingsJSON(set assistant.Settings) map[string]any {
 	return map[string]any{
 		"tz":          set.TZ,

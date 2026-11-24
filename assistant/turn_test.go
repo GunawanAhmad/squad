@@ -359,3 +359,47 @@ func TestTurnPersistsToPostgres(t *testing.T) {
 		t.Fatalf("tool calls: %+v", calls)
 	}
 }
+
+func TestTurnRecordsUndoAndToolCallID(t *testing.T) {
+	st := newFakeStore()
+	reg := tools.New()
+	var seen int64
+	reg.Add(&tools.Tool{
+		Name: "write", Description: "a write tool", Parameters: map[string]any{"type": "object"},
+		Run: func(_ context.Context, env tools.Env, _ string) (tools.Result, error) {
+			seen = env.ToolCallID // the row must exist before the tool runs
+			return tools.Result{Text: "wrote it", Undo: []tools.UndoOp{{Op: "delete_task", TaskID: 1}}}, nil
+		},
+	})
+	fake := llm.NewFake(
+		llm.FakeStep{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "write", Arguments: "{}"}}},
+		llm.FakeStep{Text: "done"},
+	)
+	r := New(Config{Store: st, Tools: reg, Models: map[string]llm.Model{
+		string(llm.OpenCodeProvider): fake, string(llm.ClaudeProvider): fake,
+	}, Location: testLoc, Now: func() time.Time { return testNow }})
+
+	char := Character{ID: "assistant", Provider: "opencode", Model: "fake", Tools: []string{"write"}}
+	emit, events := collectEvents()
+	if _, err := r.Turn(context.Background(), TurnRequest{ConversationID: "c", Character: char, Input: "do it"}, emit); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := st.toolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("calls: %+v", calls)
+	}
+	if seen != calls[0].ID || calls[0].ID == 0 {
+		t.Fatalf("tool did not see its call id: env=%d row=%d", seen, calls[0].ID)
+	}
+	if string(calls[0].Undo) != `[{"op":"delete_task","task_id":1}]` {
+		t.Fatalf("stored undo: %s", calls[0].Undo)
+	}
+	msgs := st.messages()
+	if !strings.Contains(msgs[2].Content, "(undo: tool_call_id=1)") {
+		t.Fatalf("tool result: %q", msgs[2].Content)
+	}
+	if (*events)[0].ID != calls[0].ID {
+		t.Fatalf("tool event has no call id: %+v", (*events)[0])
+	}
+}
