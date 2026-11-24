@@ -1,4 +1,4 @@
-package main
+package tools
 
 import (
 	"context"
@@ -11,63 +11,14 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"regexp"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/shared"
 )
 
 const maxPageChars = 12_000
-
-var toolSpecs = map[string]shared.FunctionDefinitionParam{
-	"web_search": {
-		Name:        "web_search",
-		Description: openai.String("Search the web. Returns the top results with title, URL and a short snippet."),
-		Parameters: shared.FunctionParameters{
-			"type":       "object",
-			"properties": map[string]any{"query": map[string]any{"type": "string"}},
-			"required":   []string{"query"},
-		},
-	},
-	"fetch_url": {
-		Name:        "fetch_url",
-		Description: openai.String("Fetch a web page and return its readable text. Use it to read a result from web_search in full."),
-		Parameters: shared.FunctionParameters{
-			"type":       "object",
-			"properties": map[string]any{"url": map[string]any{"type": "string"}},
-			"required":   []string{"url"},
-		},
-	},
-}
-
-// runTool never fails the chat: errors go back to the model as text so it can recover.
-func runTool(ctx context.Context, c Character, name, rawArgs string) string {
-	if !slices.Contains(c.Tools, name) {
-		return "error: tool not available: " + name
-	}
-
-	var args struct{ Query, URL string }
-	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
-		return "error: bad arguments: " + err.Error()
-	}
-
-	var out string
-	var err error
-	switch name {
-	case "web_search":
-		out, err = webSearch(ctx, args.Query)
-	case "fetch_url":
-		out, err = fetchURL(ctx, args.URL)
-	}
-	if err != nil {
-		return "error: " + err.Error()
-	}
-	return out
-}
 
 // webSearch queries the self-hosted SearXNG. It uses the default HTTP client on purpose:
 // SearXNG is configured by you and lives on localhost, which fetchClient would block.
@@ -83,10 +34,7 @@ func webSearch(ctx context.Context, query string) (string, error) {
 	}
 
 	defer func() {
-		err := resp.Body.Close()
-		if err != nil {
-			return
-		}
+		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode != http.StatusOK {
@@ -181,10 +129,7 @@ func fetchURL(ctx context.Context, rawURL string) (string, error) {
 	}
 
 	defer func() {
-		err := resp.Body.Close()
-		if err != nil {
-			return
-		}
+		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode >= 400 {
@@ -230,4 +175,11 @@ func htmlToText(s string) string {
 	s = reSpaces.ReplaceAllString(s, " ")
 	s = reBlank.ReplaceAllString(s, "\n")
 	return strings.TrimSpace(s)
+}
+
+func envOr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
 }

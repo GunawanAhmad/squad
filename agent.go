@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"characters/llm"
+	"characters/tools"
 )
 
 const maxSteps = 10
@@ -43,20 +43,6 @@ func loadSystemPrompt(c Character) string {
 	return sysPrompt + nowBlock(time.Now(), timeZone())
 }
 
-// Tool specs are mapped here until the typed registry lands (F-6).
-func specsFor(c Character) []llm.ToolSpec {
-	var out []llm.ToolSpec
-	for _, name := range c.Tools {
-		spec, ok := toolSpecs[name]
-		if !ok {
-			continue
-		}
-		params, _ := json.Marshal(spec.Parameters)
-		out = append(out, llm.ToolSpec{Name: name, Description: spec.Description.Value, Parameters: params})
-	}
-	return out
-}
-
 // runChat is the old /api/chat loop. F-7 moves it to assistant.Turn and F-9
 // deletes this path; until then it keeps characters working on the new adapters.
 func runChat(ctx context.Context, c Character, sessionID string, history []chatMsg, send func(event)) error {
@@ -66,7 +52,7 @@ func runChat(ctx context.Context, c Character, sessionID string, history []chatM
 	}
 
 	system := loadSystemPrompt(c)
-	specs := specsFor(c)
+	specs := toolRegistry.Specs(c.Tools)
 	for range maxSteps {
 		resp, err := openCodeModel().Stream(ctx, llm.Request{
 			Model: c.Model, System: system, Messages: msgs, Tools: specs, Session: sessionID,
@@ -85,9 +71,13 @@ func runChat(ctx context.Context, c Character, sessionID string, history []chatM
 		})
 		for _, tc := range resp.ToolCalls {
 			send(event{Type: "tool", Name: tc.Name, Args: tc.Arguments})
-			msgs = append(msgs, llm.Message{
-				Role: "tool", ToolCallID: tc.ID, Content: runTool(ctx, c, tc.Name, tc.Arguments),
-			})
+			out, err := toolRegistry.Run(ctx, tools.Env{
+				CharacterID: c.ID, ConversationID: sessionID, Allowed: c.Tools, Now: time.Now(),
+			}, tc.Name, tc.Arguments)
+			if err != nil {
+				out = "error: " + err.Error()
+			}
+			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: out})
 		}
 	}
 	send(event{Type: "text", Delta: "\n\n(stopped: too many tool steps)"})

@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"characters/tools"
 )
 
 //go:embed web
@@ -41,6 +43,9 @@ type chatRequest struct {
 
 var sessionIDRe = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 
+// Stateless: the tools themselves keep no state (store-backed tools arrive in L-2).
+var toolRegistry = tools.New()
+
 func main() {
 	loadDotEnv(".env")
 	if os.Getenv("OPENCODE_API_KEY") == "" {
@@ -58,7 +63,7 @@ func main() {
 	chars := map[string]Character{}
 	for _, c := range list {
 		for _, t := range c.Tools {
-			if _, ok := toolSpecs[t]; !ok {
+			if !toolRegistry.Has(t) {
 				log.Fatalf("character %q: unknown tool %q", c.ID, t)
 			}
 		}
