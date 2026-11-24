@@ -98,7 +98,9 @@ func withSearchPath(dsn, schema string) string {
 	if strings.Contains(dsn, "?") {
 		sep = "&"
 	}
-	return dsn + sep + "search_path=" + schema
+	// public stays on the path for the pgvector type (the extension lives in
+	// public); the throwaway schema still shadows every app table.
+	return dsn + sep + "search_path=" + schema + ",public"
 }
 
 // databaseURL reads DATABASE_URL from the environment, then from the nearest

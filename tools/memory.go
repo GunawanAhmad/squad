@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"characters/llm"
 	"characters/store"
 )
 
@@ -297,11 +298,27 @@ func recallTool() *Tool {
 			if env.Loc != nil {
 				tz = env.Loc.String()
 			}
-			hits, err := env.DB.SearchMessages(ctx, store.MessageQuery{Text: args.Query, From: from, To: to, TZ: tz, Limit: 8})
+			var vec []float32
+			var embeddingModel string
+			if env.Embedder != nil {
+				ectx, cancel := context.WithTimeout(ctx, time.Second)
+				v, err := llm.EmbedOne(ectx, env.Embedder, args.Query)
+				cancel()
+				if err == nil {
+					vec, embeddingModel = v, env.Embedder.Model()
+				}
+			}
+			hits, err := env.DB.SearchMessages(ctx, store.MessageQuery{
+				Text: args.Query, From: from, To: to, TZ: tz, Limit: 8,
+				Vector: vec, EmbeddingModel: embeddingModel,
+			})
 			if err != nil {
 				return Result{}, err
 			}
-			facts, err := env.DB.SearchFacts(ctx, store.FactQuery{Text: args.Query, From: from, To: to, Limit: 8})
+			facts, err := env.DB.SearchFacts(ctx, store.FactQuery{
+				Text: args.Query, From: from, To: to, Limit: 8,
+				Vector: vec, EmbeddingModel: embeddingModel,
+			})
 			if err != nil {
 				return Result{}, err
 			}

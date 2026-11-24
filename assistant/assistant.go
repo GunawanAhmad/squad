@@ -57,6 +57,8 @@ type Config struct {
 	DB *store.Store
 	// Settings reads settings.tz and the day boundary; nil means defaults.
 	Settings func(ctx context.Context) Settings
+	// Embedder enables hybrid retrieval (M-10); nil means keyword-only.
+	Embedder llm.Embedder
 }
 
 type Runner struct {
@@ -72,6 +74,7 @@ type Runner struct {
 	beforeTurn func(context.Context)
 	db         *store.Store
 	settings   func(context.Context) Settings
+	embedder   llm.Embedder
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
@@ -90,6 +93,7 @@ func New(cfg Config) *Runner {
 		beforeTurn: cfg.BeforeTurn,
 		db:         cfg.DB,
 		settings:   cfg.Settings,
+		embedder:   cfg.Embedder,
 		locks:      map[string]*sync.Mutex{},
 	}
 	if r.tools == nil {
@@ -207,7 +211,7 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 		if tz == "" && set.Loc != nil {
 			tz = set.Loc.String()
 		}
-		hits, err := Retrieve(ctx, searcher, req.Input, set.Loc, tz, cctxIDs(history))
+		hits, err := Retrieve(ctx, searcher, req.Input, set.Loc, tz, cctxIDs(history), r.embedder)
 		if err != nil {
 			log.Printf("assistant: pre-retrieval: %v", err)
 		} else {
@@ -260,7 +264,7 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 		CharacterID: req.Character.ID, ConversationID: conv.ID,
 		Allowed: req.Character.Tools, Now: now,
 		DB: r.db, Loc: set.Loc, Day: day,
-		SourceMessageID: &userMsg.ID,
+		SourceMessageID: &userMsg.ID, Embedder: r.embedder,
 	}
 
 	var usage llm.Usage

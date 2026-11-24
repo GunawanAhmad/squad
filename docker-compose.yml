@@ -24,5 +24,19 @@ services:
       timeout: 3s
       retries: 30
 
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "127.0.0.1:11434:11434" # localhost only: never 0.0.0.0, published ports bypass the host firewall
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 volumes:
   pgdata: # named volume; `docker compose down -v` deletes it
+  ollama: # bge-m3 weights; re-pull after down -v

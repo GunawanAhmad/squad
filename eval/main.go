@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -34,7 +35,10 @@ type config struct {
 	sets       []string
 	dryRun     bool
 	maxSteps   int
-	limit      int // cases per set, for a cheap smoke run (0 = all)
+	limit      int  // cases per set, for a cheap smoke run (0 = all)
+	hybrid     bool // embed queries and search by meaning too (M-10)
+	measure    bool // measure embedding speed on real messages, then exit
+	measureN   int
 }
 
 var assistantTools = []string{
@@ -53,6 +57,9 @@ func main() {
 		dryRun     = flag.Bool("dry-run", false, "print the plan and the estimated number of model calls, call nothing")
 		maxSteps   = flag.Int("max-steps", 5, "tool loop steps per time query")
 		limit      = flag.Int("limit", 0, "run only the first N cases per set (smoke test; 0 = all)")
+		hybrid     = flag.Bool("hybrid", false, "use hybrid keyword+vector search (needs Ollama; M-10)")
+		measure    = flag.Bool("measure", false, "measure embedding speed on real messages (needs Ollama), then exit")
+		measureN   = flag.Int("measure-limit", 50, "messages to embed in -measure")
 	)
 	flag.Parse()
 
@@ -63,6 +70,9 @@ func main() {
 		dryRun:     *dryRun,
 		maxSteps:   *maxSteps,
 		limit:      *limit,
+		hybrid:     *hybrid,
+		measure:    *measure,
+		measureN:   *measureN,
 	}
 	for _, m := range splitList(*models) {
 		cfg.models = append(cfg.models, m)
@@ -91,6 +101,17 @@ func main() {
 	}
 	base := envOr("OPENCODE_BASE_URL", "https://opencode.ai/inference/go/openai/v1")
 	client := llm.NewOpenCode(key, base)
+
+	embModel := envOr("EMBEDDINGS_MODEL", "bge-m3")
+	var embedder llm.Embedder
+	if cfg.hybrid || cfg.measure {
+		embedder = llm.NewOpenAIEmbeddings(
+			envOr("EMBEDDINGS_URL", "http://127.0.0.1:11434/v1"), "ollama", embModel, 1024)
+	}
+	if cfg.measure {
+		measureEmbeddings(dsn, embedder, cfg.measureN)
+		return
+	}
 
 	persona := loadAssistantPersona()
 	reg := tools.New()
@@ -128,7 +149,7 @@ func main() {
 			}
 		}
 		if contains(cfg.sets, "memory") {
-			res, err := runMemorySet(client, reg, persona, model, dsn, cfg.runs, cfg.maxSteps, cfg.limit, memoryCases, "memory")
+			res, err := runMemorySet(client, reg, persona, model, dsn, cfg.runs, cfg.maxSteps, cfg.limit, memoryCases, "memory", embedder)
 			if err != nil {
 				fmt.Printf("memory: %v\n", err)
 			} else {
@@ -136,7 +157,7 @@ func main() {
 			}
 		}
 		if contains(cfg.sets, "lang") {
-			res, err := runMemorySet(client, reg, persona, model, dsn, cfg.runs, cfg.maxSteps, cfg.limit, crossLanguageCases, "cross-language")
+			res, err := runMemorySet(client, reg, persona, model, dsn, cfg.runs, cfg.maxSteps, cfg.limit, crossLanguageCases, "cross-language", embedder)
 			if err != nil {
 				fmt.Printf("cross-language: %v\n", err)
 			} else {
@@ -181,6 +202,9 @@ func printEstimate(cfg config) {
 	fmt.Printf("  cross-language: %d cases x %d runs x ~4 = %d calls\n", len(crossLanguageCases), cfg.runs, langCalls)
 	fmt.Printf("  per model: ~%d calls\n", perModel)
 	fmt.Printf("  models (%d): %s\n", len(models), strings.Join(models, ", "))
+	if cfg.hybrid {
+		fmt.Println("  mode: hybrid (keyword + vectors)")
+	}
 	fmt.Printf("  total: ~%d calls\n", perModel*len(models))
 }
 
@@ -781,7 +805,7 @@ func coreFactsBlock(ctx context.Context, db *store.Store) string {
 	return b.String()
 }
 
-func runMemorySet(client llm.Model, reg *tools.Registry, persona, model, dsn string, runs, maxSteps, limit int, cases []memoryCase, label string) (passResult, error) {
+func runMemorySet(client llm.Model, reg *tools.Registry, persona, model, dsn string, runs, maxSteps, limit int, cases []memoryCase, label string, embedder llm.Embedder) (passResult, error) {
 	ctx := context.Background()
 	specs := memorySpecs(reg)
 	settings := assistant.Settings{
@@ -805,7 +829,7 @@ func runMemorySet(client llm.Model, reg *tools.Registry, persona, model, dsn str
 			rec := assistant.LoadRecords(ctx, db, evalDay, settings)
 			var retrieved []assistant.Retrieved
 			if len(c.Turns) > 0 {
-				retrieved, _ = assistant.Retrieve(ctx, db, c.Turns[0], evalLoc, "Asia/Makassar", nil)
+				retrieved, _ = assistant.Retrieve(ctx, db, c.Turns[0], evalLoc, "Asia/Makassar", nil, embedder)
 			}
 			system := assistant.BuildContext(assistant.ContextInput{
 				Character: assistant.Character{ID: "assistant", Name: "Assistant", Persona: persona, Tools: append(assistantTools, memoryTools...), Daily: true},
@@ -814,7 +838,7 @@ func runMemorySet(client llm.Model, reg *tools.Registry, persona, model, dsn str
 			}).System
 			env := tools.Env{
 				CharacterID: "assistant", Allowed: append(assistantTools, memoryTools...),
-				Now: evalNow, DB: db, Day: evalDay, Loc: evalLoc,
+				Now: evalNow, DB: db, Day: evalDay, Loc: evalLoc, Embedder: embedder,
 			}
 			answer, called, runErr := runScript(ctx, client, model, system, specs, reg, env, c.Turns, maxSteps)
 			if runErr == nil && c.Check != nil {
@@ -933,4 +957,55 @@ func runScript(ctx context.Context, client llm.Model, model, system string, spec
 		}
 	}
 	return last, called, nil
+}
+
+// measureEmbeddings reports the M-10 numbers on real messages: dimensions,
+// speed and (when nvidia-smi exists) VRAM. It writes nothing to the database.
+func measureEmbeddings(dsn string, embedder llm.Embedder, n int) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, dsn)
+	if err != nil {
+		fail(err.Error())
+	}
+	defer db.Close()
+	corpus, err := db.EmbeddingCorpus(ctx, n)
+	if err != nil {
+		fail("corpus: " + err.Error())
+	}
+	if len(corpus) == 0 {
+		fail("no messages to measure")
+	}
+	texts := make([]string, len(corpus))
+	for i, r := range corpus {
+		texts[i] = r.Content
+	}
+	start := time.Now()
+	vecs, err := embedder.Embed(ctx, texts)
+	elapsed := time.Since(start)
+	if err != nil {
+		fail("embeddings: " + err.Error())
+	}
+	var dims int
+	if len(vecs) > 0 {
+		dims = len(vecs[0])
+	}
+	ms := float64(elapsed.Milliseconds()) / float64(len(texts))
+	fmt.Printf("model:      %s\n", embedder.Model())
+	fmt.Printf("messages:   %d real messages\n", len(texts))
+	fmt.Printf("dimensions: %d\n", dims)
+	fmt.Printf("time:       %s total, %.1f ms/text, %.1f texts/s\n",
+		elapsed.Round(time.Millisecond), ms, float64(len(texts))/elapsed.Seconds())
+	if out, err := exec.Command("nvidia-smi", "--query-gpu=name,memory.used,memory.total",
+		"--format=csv,noheader").Output(); err == nil {
+		fmt.Printf("gpu:        %s", strings.TrimSpace(string(out)))
+		fmt.Println()
+	}
+	if out, err := exec.Command("ollama", "show", embedder.Model()).Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "parameters") || strings.HasPrefix(line, "quantization") {
+				fmt.Printf("%s\n", line)
+			}
+		}
+	}
 }

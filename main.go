@@ -118,6 +118,16 @@ func main() {
 		BeforeTurn: func(ctx context.Context) { backup.Maybe(ctx, assistant.Now()) },
 	})
 
+	// Semantic search (M-10): local Ollama, OpenAI-compatible. If it is not
+	// running, embeddings wait and every search stays keyword-only.
+	embedder := llm.NewOpenAIEmbeddings(
+		envOr("EMBEDDINGS_URL", "http://127.0.0.1:11434/v1"),
+		"ollama",
+		envOr("EMBEDDINGS_MODEL", "bge-m3"),
+		1024,
+	)
+	go (&assistant.EmbedWorker{Store: db, Embedder: embedder}).Run(context.Background())
+
 	var engine *assistant.Engine
 	if c, ok := chars[assistantCharacterID]; ok {
 		provider, model, err := resolveModel(c, "")

@@ -169,3 +169,47 @@ func TestMemoryValidation(t *testing.T) {
 	// Undo of remember is refused once the fact changed (an edit bumps updated_at).
 	runTool(t, env, "remember", `{"text":"likes tea"}`)
 }
+
+type fakeEmbedder struct{ model string }
+
+func (f fakeEmbedder) Model() string { return f.model }
+func (f fakeEmbedder) Dims() int     { return 1024 }
+func (f fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i := range texts {
+		vec := make([]float32, 1024)
+		vec[0] = 1
+		out[i] = vec
+	}
+	return out, nil
+}
+
+func TestRecallHybridFindsCrossLanguage(t *testing.T) {
+	db := storetest.New(t)
+	env, _ := envFor(t, db, "recall")
+	ctx := context.Background()
+	day := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := db.CreateConversation(ctx, store.Conversation{ID: "daily:2026-11-01", CharacterID: "assistant", Day: &day}); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := db.AddMessage(ctx, store.Message{ConversationID: "daily:2026-11-01", Role: "user", Content: "capek banget, deadline bikin stres"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vec := make([]float32, 1024)
+	vec[0] = 1
+	if err := db.SetMessageEmbedding(ctx, msg.ID, vec, "fake"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Keyword-only cannot match the English question.
+	if out := runTool(t, env, "recall", `{"query":"burned out"}`); !strings.Contains(out.Text, "no matches") {
+		t.Fatalf("keyword recall: %q", out.Text)
+	}
+	// With an embedder, the Indonesian message is found by meaning.
+	env.Embedder = fakeEmbedder{model: "fake"}
+	out := runTool(t, env, "recall", `{"query":"burned out"}`)
+	if !strings.Contains(out.Text, "capek banget") {
+		t.Fatalf("hybrid recall: %q", out.Text)
+	}
+}

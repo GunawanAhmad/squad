@@ -27,6 +27,7 @@ type Env struct {
 	Loc             *time.Location // settings.tz
 	ToolCallID      int64          // this call's tool_calls row, stamped on records
 	SourceMessageID *int64         // the user message that triggered the turn
+	Embedder        llm.Embedder   // nil = keyword-only recall (M-10)
 }
 
 // Result is what a tool returns: text for the model and, for write tools, the

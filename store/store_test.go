@@ -179,7 +179,7 @@ func TestSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != 3 {
-		t.Fatalf("schema version = %d, want 3", v)
+	if v != 4 {
+		t.Fatalf("schema version = %d, want 4", v)
 	}
 }

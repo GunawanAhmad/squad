@@ -249,6 +249,10 @@ type MessageQuery struct {
 	To    *time.Time // inclusive local day
 	TZ    string     // zone for messages without a daily thread; default UTC
 	Limit int
+	// Vector makes the search hybrid (RRF of full-text and cosine). Empty
+	// means keyword-only, which is the fallback when Ollama is not running.
+	Vector         []float32
+	EmbeddingModel string
 	// Exclude lists message ids already in the prompt.
 	Exclude []int64
 	// Forgotten messages are never returned.
@@ -269,7 +273,25 @@ type MessageHit struct {
 // SearchMessages finds messages by words, ranked by full-text rank with a
 // recency boost, newest first for equal rank. 'simple' config: no stemming, so
 // mixed Indonesian/English works without pretending one language.
+// SearchMessages is keyword-only, or hybrid when q.Vector is set.
 func (s *Store) SearchMessages(ctx context.Context, q MessageQuery) ([]MessageHit, error) {
+	if len(q.Vector) == 0 || q.EmbeddingModel == "" {
+		return s.searchMessagesKeyword(ctx, q)
+	}
+	wide := q
+	wide.Limit = 50
+	keyword, err := s.searchMessagesKeyword(ctx, wide)
+	if err != nil {
+		return nil, err
+	}
+	vector, err := s.searchMessagesVector(ctx, wide)
+	if err != nil {
+		return nil, err
+	}
+	return mergeRRF(keyword, vector, func(h MessageHit) int64 { return h.ID }, q.Limit), nil
+}
+
+func (s *Store) searchMessagesKeyword(ctx context.Context, q MessageQuery) ([]MessageHit, error) {
 	text := strings.TrimSpace(q.Text)
 	if text == "" {
 		return nil, nil
@@ -331,9 +353,30 @@ type FactQuery struct {
 	From  *time.Time
 	To    *time.Time
 	Limit int
+	// Vector and EmbeddingModel turn on hybrid search (M-10).
+	Vector         []float32
+	EmbeddingModel string
 }
 
+// SearchFacts is keyword-only, or hybrid when q.Vector is set.
 func (s *Store) SearchFacts(ctx context.Context, q FactQuery) ([]Fact, error) {
+	if len(q.Vector) == 0 || q.EmbeddingModel == "" {
+		return s.searchFactsKeyword(ctx, q)
+	}
+	wide := q
+	wide.Limit = 50
+	keyword, err := s.searchFactsKeyword(ctx, wide)
+	if err != nil {
+		return nil, err
+	}
+	vector, err := s.searchFactsVector(ctx, wide)
+	if err != nil {
+		return nil, err
+	}
+	return mergeRRF(keyword, vector, func(f Fact) int64 { return f.ID }, q.Limit), nil
+}
+
+func (s *Store) searchFactsKeyword(ctx context.Context, q FactQuery) ([]Fact, error) {
 	text := strings.TrimSpace(q.Text)
 	if text == "" {
 		return nil, nil

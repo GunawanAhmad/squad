@@ -37,7 +37,7 @@ func TestRetrieve(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, err := Retrieve(ctx, db, "deadline stres", testLoc, "Asia/Makassar", nil)
+	items, err := Retrieve(ctx, db, "deadline stres", testLoc, "Asia/Makassar", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestRetrieve(t *testing.T) {
 	}
 
 	// A message already in the window is not repeated.
-	items, err = Retrieve(ctx, db, "deadline stres", testLoc, "Asia/Makassar", []int64{old.ID})
+	items, err = Retrieve(ctx, db, "deadline stres", testLoc, "Asia/Makassar", []int64{old.ID}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,10 +64,10 @@ func TestRetrieve(t *testing.T) {
 	}
 
 	// Short queries and misses cost nothing.
-	if items, _ := Retrieve(ctx, db, "a", testLoc, "Asia/Makassar", nil); len(items) != 0 {
+	if items, _ := Retrieve(ctx, db, "a", testLoc, "Asia/Makassar", nil, nil); len(items) != 0 {
 		t.Fatalf("short query: %+v", items)
 	}
-	if items, _ := Retrieve(ctx, db, "zeppelin", testLoc, "Asia/Makassar", nil); len(items) != 0 {
+	if items, _ := Retrieve(ctx, db, "zeppelin", testLoc, "Asia/Makassar", nil, nil); len(items) != 0 {
 		t.Fatalf("miss: %+v", items)
 	}
 }
@@ -85,7 +85,7 @@ func TestRetrieveSkipsForgotten(t *testing.T) {
 	if err := db.ForgetMessage(ctx, m.ID); err != nil {
 		t.Fatal(err)
 	}
-	if items, _ := Retrieve(ctx, db, "secret deadline", testLoc, "UTC", nil); len(items) != 0 {
+	if items, _ := Retrieve(ctx, db, "secret deadline", testLoc, "UTC", nil, nil); len(items) != 0 {
 		t.Fatalf("forgotten message retrieved: %+v", items)
 	}
 }
@@ -146,5 +146,45 @@ func TestAssistantTurnRetrievesOldMessages(t *testing.T) {
 	}
 	if !containsSection(trace.Sections, "recall") {
 		t.Fatalf("trace sections: %v", trace.Sections)
+	}
+}
+
+type fixedEmbedder struct{ model string }
+
+func (f fixedEmbedder) Model() string { return f.model }
+func (f fixedEmbedder) Dims() int     { return 1024 }
+func (f fixedEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i := range texts {
+		vec := make([]float32, 1024)
+		vec[3] = 1
+		out[i] = vec
+	}
+	return out, nil
+}
+
+func TestRetrieveHybrid(t *testing.T) {
+	db := storetest.New(t)
+	ctx := context.Background()
+	if _, err := db.CreateConversation(ctx, store.Conversation{ID: "c", CharacterID: "assistant"}); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := db.AddMessage(ctx, store.Message{ConversationID: "c", Role: "user", Content: "capek banget, deadline bikin stres"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vec := make([]float32, 1024)
+	vec[3] = 1
+	if err := db.SetMessageEmbedding(ctx, msg.ID, vec, "fake"); err != nil {
+		t.Fatal(err)
+	}
+	emb := fixedEmbedder{model: "fake"}
+	items, err := Retrieve(ctx, db, "burned out", testLoc, "Asia/Makassar", nil, emb)
+	if err != nil || len(items) == 0 || !strings.Contains(items[0].Text, "capek") {
+		t.Fatalf("hybrid retrieval: %+v, %v", items, err)
+	}
+	// Without an embedder the same query finds nothing.
+	if items, _ := Retrieve(ctx, db, "burned out", testLoc, "Asia/Makassar", nil, nil); len(items) != 0 {
+		t.Fatalf("keyword retrieval found something: %+v", items)
 	}
 }
