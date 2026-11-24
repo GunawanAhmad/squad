@@ -37,7 +37,12 @@ function onKey(e: KeyboardEvent) {
 onMounted(async () => {
   window.addEventListener('keydown', onKey);
   try {
-    await importLegacy();
+    try {
+      await importLegacy();
+    } catch (err) {
+      // A failed one-time import must not block chatting; retry next visit.
+      messages.value.push({ role: 'assistant', content: '⚠️ Could not import the old chat: ' + (err as Error).message });
+    }
     await openConversation();
   } catch (err) {
     messages.value.push({ role: 'assistant', content: '⚠️ ' + (err as Error).message });
@@ -194,7 +199,7 @@ function onEnter(e: KeyboardEvent) {
 
 async function send() {
   const text = input.value.trim();
-  if (!text || busy.value || !ready.value) return;
+  if (!text || busy.value || !ready.value || !conversationId.value) return;
   input.value = '';
   if (inputEl.value) inputEl.value.style.height = '';
 
