@@ -234,6 +234,12 @@ func TestLoadRecords(t *testing.T) {
 	if f.from != day.AddDate(0, 0, -maxDigestDays) || f.to != day.AddDate(0, 0, -1) {
 		t.Fatalf("digest window: %v..%v", f.from, f.to)
 	}
+	if len(rec.NotedFacts) != 1 {
+		t.Fatalf("noted facts: %+v", rec.NotedFacts)
+	}
+	if text := rec.Prompt(mustLoc("Asia/Makassar"), 4*time.Hour, time.Date(2026, 12, 1, 21, 0, 0, 0, time.UTC)); !strings.Contains(text, "Facts noted today") {
+		t.Fatalf("noted facts missing from today section:\n%s", text)
+	}
 }
 
 // fakeRecords implements RecordsStore with just enough shape to test the
@@ -291,6 +297,10 @@ func (f *fakeRecords) Projects(_ context.Context) ([]store.Project, error) {
 	return []store.Project{{ID: 1, Name: "work"}}, nil
 }
 
+func (f *fakeRecords) NotedFacts(_ context.Context, _ time.Time, _ int) ([]store.Fact, error) {
+	return []store.Fact{{ID: 9, Text: "mom is visiting", Category: "person", ValidFrom: f.day.AddDate(0, 0, -1)}}, nil
+}
+
 func containsSection(sections []string, want string) bool {
 	for _, s := range sections {
 		if s == want {
@@ -298,4 +308,60 @@ func containsSection(sections []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestContextBudgets(t *testing.T) {
+	loc := mustLoc("Asia/Makassar")
+	now := time.Date(2026, 12, 1, 9, 30, 0, 0, time.UTC)
+	day := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
+	set := Settings{Loc: loc, DayStartsAt: 4 * time.Hour}
+
+	// A deliberately absurd turn: long persona, long memory, a full day, a
+	// week of digest, ten recall hits and a long summary.
+	rec := &Records{Day: day}
+	for i := 0; i < 60; i++ {
+		planned := day
+		rec.TodayPlans = append(rec.TodayPlans, store.Task{ID: int64(i + 1), Title: strings.Repeat("plan ", 20), Status: "open", PlannedOn: &planned})
+		rec.TodayActivities = append(rec.TodayActivities, store.Activity{Description: strings.Repeat("activity ", 20)})
+	}
+	daySummary := DaySummary{Day: day.AddDate(0, 0, -1)}
+	for i := 0; i < 20; i++ {
+		daySummary.Activities = append(daySummary.Activities, store.Activity{Description: strings.Repeat("did ", 120)})
+	}
+	rec.Digest = []DaySummary{daySummary}
+	var retrieved []Retrieved
+	for i := 0; i < 10; i++ {
+		retrieved = append(retrieved, Retrieved{Kind: "message", ID: int64(i + 1), When: "2026-11-01", Who: "ria", Text: strings.Repeat("quoted ", 60)})
+	}
+
+	c := BuildContext(ContextInput{
+		Character: Character{Persona: strings.Repeat("persona ", 1000)},
+		Memory:    strings.Repeat("memory ", 1500),
+		Summary:   strings.Repeat("summary ", 500),
+		Now:       now, Settings: set, Records: rec, Retrieved: retrieved,
+	})
+	if len(c.System) > MaxSystemChars {
+		t.Fatalf("system context is %d chars, budget %d", len(c.System), MaxSystemChars)
+	}
+	want := map[string]bool{"persona": true, "memory": true, "today": true, "recent_days": true, "recall": true, "summary": true}
+	for _, name := range c.Truncated {
+		delete(want, name)
+	}
+	if len(want) > 0 {
+		t.Fatalf("sections not reported as truncated: %v (all: %v)", want, c.Truncated)
+	}
+
+	// A normal turn stays under budget with nothing cut.
+	small := BuildContext(ContextInput{
+		Character: Character{Persona: "You are Ria."},
+		Memory:    "<memory>short</memory>",
+		History:   []store.Message{{ID: 1, Role: "user", Content: "hi"}},
+		Now:       now, Settings: set,
+	})
+	if len(small.System) > MaxSystemChars || len(small.Truncated) != 0 {
+		t.Fatalf("small context: %d chars, truncated %v", len(small.System), small.Truncated)
+	}
+	if !containsSection(small.Sections, "history") {
+		t.Fatalf("history section missing: %v", small.Sections)
+	}
 }

@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"encoding/json"
+	"log"
 	"strings"
 	"time"
 
@@ -10,6 +11,19 @@ import (
 )
 
 const DefaultWindow = 40
+
+// Context v2 budgets. They sum below MaxSystemChars, so the total is a safety
+// net, not the normal case; every cut is recorded and logged.
+const (
+	MaxSystemChars  = 16000
+	budgetPersona   = 3000
+	budgetMemory    = 3000
+	budgetToday     = 3000
+	budgetDigest    = 2000
+	budgetRecall    = 1500
+	budgetSummary   = 1200
+	truncatedSuffix = "\n…(truncated)\n"
+)
 
 // Character is the part of a character config the turn runner needs.
 type Character struct {
@@ -31,6 +45,7 @@ type Context struct {
 	Messages   []llm.Message
 	MessageIDs []int64
 	Sections   []string
+	Truncated  []string // sections that hit their budget
 	Window     int
 }
 
@@ -46,6 +61,7 @@ type ContextInput struct {
 	Settings  Settings
 	Records   *Records    // nil for persona chats
 	Retrieved []Retrieved // pre-retrieval hits, quoted as data
+	Summary   string      // rolling summary of older messages
 }
 
 // BuildContext assembles persona, memory, the day's records, the clock and the
@@ -62,26 +78,45 @@ func BuildContext(in ContextInput) Context {
 		loc = time.UTC
 	}
 
-	var sections []string
-	system := strings.TrimSpace(char.Persona)
+	var sections, truncated []string
+	fit := func(name, text string, budget int) string {
+		if len(text) <= budget {
+			return text
+		}
+		truncated = append(truncated, name)
+		return clipRunes(text, budget) + truncatedSuffix
+	}
+
+	system := fit("persona", strings.TrimSpace(char.Persona), budgetPersona)
 	sections = append(sections, "persona")
 	if strings.TrimSpace(memory) != "" {
-		system += "\n\n" + memory
+		system += fit("memory", "\n\n"+memory, budgetMemory)
 		sections = append(sections, "memory")
 	}
 	if rec != nil {
-		system += rec.Prompt(loc, set.DayStartsAt, now)
+		today, digest := rec.PromptParts(loc, set.DayStartsAt, now)
+		system += fit("today", today, budgetToday)
 		sections = append(sections, "today")
-		if len(rec.Digest) > 0 {
+		if digest != "" {
+			system += fit("recent_days", digest, budgetDigest)
 			sections = append(sections, "recent_days")
 		}
 	}
 	if len(in.Retrieved) > 0 {
-		system += recallPrompt(in.Retrieved)
+		system += fit("recall", recallPrompt(in.Retrieved), budgetRecall)
 		sections = append(sections, "recall")
+	}
+	if strings.TrimSpace(in.Summary) != "" {
+		system += fit("summary", "\n<summary>\nEarlier in this conversation (compressed):\n"+
+			strings.TrimSpace(in.Summary)+"\n</summary>\n", budgetSummary)
+		sections = append(sections, "summary")
 	}
 	system += NowBlock(now, loc)
 	sections = append(sections, "now")
+	if len(system) > MaxSystemChars {
+		truncated = append(truncated, "total")
+		system = clipRunes(system, MaxSystemChars) + truncatedSuffix
+	}
 
 	if len(history) > window {
 		history = history[len(history)-window:]
@@ -93,12 +128,24 @@ func BuildContext(in ContextInput) Context {
 		sections = append(sections, "history")
 	}
 
-	c := Context{System: system, Sections: sections, Window: window}
+	c := Context{System: system, Sections: sections, Truncated: truncated, Window: window}
+	for _, t := range truncated {
+		log.Printf("context: %s section truncated to its budget", t)
+	}
 	for _, m := range history {
 		c.MessageIDs = append(c.MessageIDs, m.ID)
 		c.Messages = append(c.Messages, toLLMMessage(m))
 	}
 	return c
+}
+
+// clipRunes cuts at a rune boundary so a truncation never produces invalid UTF-8.
+func clipRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 func toLLMMessage(m store.Message) llm.Message {

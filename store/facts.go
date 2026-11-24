@@ -405,3 +405,140 @@ func (s *Store) ImportFacts(ctx context.Context, facts []Fact) (int, error) {
 	}
 	return imported, nil
 }
+
+// FactOp is one validated change from the day-close job. ApplyFactOps applies
+// them in one transaction; a rejected item never reaches this method.
+type FactOp struct {
+	Op       string // ADD | SUPERSEDE | NONE
+	ID       int64  // SUPERSEDE: the active fact being replaced
+	Text     string
+	Category string
+	Core     bool
+}
+
+// ApplyFactOps writes a day's extracted facts atomically. SUPERSEDE inserts the
+// new fact and closes the old one on the day the new one starts.
+func (s *Store) ApplyFactOps(ctx context.Context, day time.Time, ops []FactOp) (int, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	applied := 0
+	for _, op := range ops {
+		category := op.Category
+		if category == "" || !ValidFactCategory(category) {
+			category = "general"
+		}
+		switch op.Op {
+		case "ADD":
+			_, err := tx.Exec(ctx, `
+				INSERT INTO facts (text, category, core, source_kind, valid_from)
+				VALUES ($1, $2, $3, 'extraction', $4)`,
+				strings.TrimSpace(op.Text), category, op.Core, Day(day))
+			if err != nil {
+				return applied, err
+			}
+			applied++
+		case "SUPERSEDE":
+			var newID int64
+			err := tx.QueryRow(ctx, `
+				INSERT INTO facts (text, category, core, source_kind, valid_from)
+				VALUES ($1, $2, $3, 'extraction', $4)
+				RETURNING id`,
+				strings.TrimSpace(op.Text), category, op.Core, Day(day)).Scan(&newID)
+			if err != nil {
+				return applied, err
+			}
+			tag, err := tx.Exec(ctx, `
+				UPDATE facts SET status = 'superseded', superseded_by = $2,
+					valid_to = GREATEST($3::date - 1, valid_from), updated_at = now()
+				WHERE id = $1 AND status = 'active'`, op.ID, newID, Day(day))
+			if err != nil {
+				return applied, err
+			}
+			if tag.RowsAffected() == 0 {
+				return applied, fmt.Errorf("fact %d is not active", op.ID)
+			}
+			applied++
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return applied, err
+	}
+	return applied, nil
+}
+
+// DayMessage is one message of a logical day, with the character it belongs to.
+type DayMessage struct {
+	ID          int64
+	CharacterID string
+	Role        string
+	Content     string
+	CreatedAt   time.Time
+}
+
+// DayMessages returns the user/assistant messages of a logical day across every
+// conversation (persona chats included), minus forgotten ones. Daily threads
+// are selected by conversations.day; other chats by local date.
+func (s *Store) DayMessages(ctx context.Context, day time.Time, from, to time.Time) ([]DayMessage, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT m.id, c.character_id, m.role, m.content, m.created_at
+		FROM messages m JOIN conversations c ON c.id = m.conversation_id
+		WHERE m.forgotten_at IS NULL AND m.role IN ('user','assistant')
+		  AND ((c.day = $1) OR (c.day IS NULL AND m.created_at >= $2 AND m.created_at < $3))
+		ORDER BY m.id`, Day(day), from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DayMessage
+	for rows.Next() {
+		var m DayMessage
+		if err := rows.Scan(&m.ID, &m.CharacterID, &m.Role, &m.Content, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// SetRunContext replaces a run's context document (rejects are recorded there).
+func (s *Store) SetRunContext(ctx context.Context, id int64, contextJSON []byte) error {
+	_, err := s.pool.Exec(ctx, `UPDATE runs SET context = $2 WHERE id = $1`, id, contextJSON)
+	return err
+}
+
+// SetSummary stores the rolling summary and the last message id it covers.
+func (s *Store) SetSummary(ctx context.Context, conversationID, summary string, upto int64) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE conversations SET summary = $2, summary_upto = $3, updated_at = now()
+		WHERE id = $1`, conversationID, summary, upto)
+	return err
+}
+
+// NotedFacts lists facts extracted since an instant (the start of today), so a
+// check-in can say "I noted: …" and the user can correct it.
+func (s *Store) NotedFacts(ctx context.Context, since time.Time, limit int) ([]Fact, error) {
+	if limit <= 0 {
+		limit = 8
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+factCols+` FROM facts
+		WHERE status = 'active' AND source_kind = 'extraction' AND created_at >= $1
+		ORDER BY id DESC LIMIT $2`, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Fact
+	for rows.Next() {
+		f, err := scanFact(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}

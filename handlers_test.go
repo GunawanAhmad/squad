@@ -102,6 +102,23 @@ func (m *memStore) Messages(_ context.Context, convID string, after int64, limit
 	return out, nil
 }
 
+func (m *memStore) RecentMessagesAfter(ctx context.Context, convID string, after int64, n int) ([]store.Message, error) {
+	all, err := m.Messages(ctx, convID, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	var out []store.Message
+	for _, msg := range all {
+		if msg.ID > after {
+			out = append(out, msg)
+		}
+	}
+	if n > 0 && len(out) > n {
+		out = out[len(out)-n:]
+	}
+	return out, nil
+}
+
 func (m *memStore) RecentMessages(ctx context.Context, convID string, n int) ([]store.Message, error) {
 	all, err := m.Messages(ctx, convID, 0, 0)
 	if err != nil || n <= 0 || len(all) <= n {

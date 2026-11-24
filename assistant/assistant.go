@@ -34,6 +34,7 @@ type Store interface {
 	CreateConversation(ctx context.Context, c store.Conversation) (store.Conversation, error)
 	AddMessage(ctx context.Context, m store.Message) (store.Message, error)
 	RecentMessages(ctx context.Context, conversationID string, n int) ([]store.Message, error)
+	RecentMessagesAfter(ctx context.Context, conversationID string, after int64, n int) ([]store.Message, error)
 	StartRun(ctx context.Context, r store.Run) (int64, error)
 	FinishRun(ctx context.Context, id int64, status, errMsg string, inputTokens, outputTokens *int) error
 	StartToolCall(ctx context.Context, tc store.ToolCall) (store.ToolCall, error)
@@ -179,7 +180,12 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 		modelName = req.Character.Model
 	}
 
-	history, err := r.store.RecentMessages(ctx, conv.ID, r.window)
+	var history []store.Message
+	if conv.SummaryUpto != nil && *conv.SummaryUpto > 0 {
+		history, err = r.store.RecentMessagesAfter(ctx, conv.ID, *conv.SummaryUpto, r.window)
+	} else {
+		history, err = r.store.RecentMessages(ctx, conv.ID, r.window)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -209,7 +215,7 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 		}
 	}
 	cctx := BuildContext(ContextInput{
-		Character: req.Character, Memory: memory, History: history,
+		Character: req.Character, Memory: memory, History: history, Summary: conv.Summary,
 		Window: r.window, Now: now, Settings: set, Records: records, Retrieved: retrieved,
 	})
 
@@ -221,6 +227,8 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 		SystemChars:         len(cctx.System),
 		RetrievedMessageIDs: retrievedMessages,
 		RetrievedFactIDs:    retrievedFacts,
+		SummaryUpto:         summaryUpto(conv),
+		Truncated:           cctx.Truncated,
 	})
 	kind := req.Kind
 	if kind == "" {
@@ -368,6 +376,13 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	return result, nil
 }
 
+// Model returns the adapter for a provider (the background jobs run on the
+// OpenCode route, where app tools work).
+func (r *Runner) Model(provider llm.Provider) (llm.Model, bool) {
+	m, ok := r.models[string(provider)]
+	return m, ok
+}
+
 func (r *Runner) modelFor(provider string) (llm.Model, error) {
 	if provider == "" {
 		provider = string(llm.OpenCodeProvider)
@@ -441,7 +456,16 @@ type contextTrace struct {
 	RetrievedMessageIDs []int64  `json:"retrieved_message_ids,omitempty"`
 	RetrievedFactIDs    []int64  `json:"retrieved_fact_ids,omitempty"`
 	Window              int      `json:"window"`
+	SummaryUpto         int64    `json:"summary_upto,omitempty"`
+	Truncated           []string `json:"truncated,omitempty"`
 	SystemChars         int      `json:"system_chars"`
+}
+
+func summaryUpto(c store.Conversation) int64 {
+	if c.SummaryUpto == nil {
+		return 0
+	}
+	return *c.SummaryUpto
 }
 
 // cctxIDs lists the ids already in the window so retrieval can skip them.

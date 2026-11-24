@@ -47,6 +47,23 @@ func (f *fakeStore) AddMessage(_ context.Context, m store.Message) (store.Messag
 	return m, nil
 }
 
+func (f *fakeStore) RecentMessagesAfter(ctx context.Context, conversationID string, after int64, n int) ([]store.Message, error) {
+	all, err := f.RecentMessages(ctx, conversationID, 0)
+	if err != nil {
+		return nil, err
+	}
+	var out []store.Message
+	for _, m := range all {
+		if m.ID > after {
+			out = append(out, m)
+		}
+	}
+	if n > 0 && len(out) > n {
+		out = out[len(out)-n:]
+	}
+	return out, nil
+}
+
 func (f *fakeStore) RecentMessages(_ context.Context, conversationID string, n int) ([]store.Message, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

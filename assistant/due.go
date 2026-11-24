@@ -40,9 +40,12 @@ type Engine struct {
 	Setting func(ctx context.Context) Settings
 	// Before is the lazy daily backup: first Due call of the day.
 	Before func(ctx context.Context, now time.Time)
+	// Window is the raw message window the summary keeps; 0 means DefaultWindow.
+	Window int
 
 	mu   sync.Mutex
 	busy bool
+	jobs jobState
 }
 
 func (e *Engine) settings(ctx context.Context) Settings {
@@ -73,8 +76,10 @@ type Plan struct {
 	Day            time.Time
 	ConversationID string
 	Reminders      []FiredReminder
-	Checkin        string // morning | evening | ""
-	CheckinRetry   bool   // a pending/failed row is being retried
+	Checkin        string      // morning | evening | ""
+	CheckinRetry   bool        // a pending/failed row is being retried
+	Close          []time.Time // past days whose facts still need extracting
+	Summary        bool        // today's thread outgrew the window
 }
 
 // CheckinResult is the outcome of Execute.
@@ -115,6 +120,14 @@ func (e *Engine) Decide(ctx context.Context, now time.Time) (Plan, error) {
 	}
 
 	plan.Checkin, plan.CheckinRetry, err = e.pickCheckin(ctx, day, now, set)
+	if err != nil {
+		return plan, err
+	}
+	plan.Close, err = e.closeJobs(ctx, day, set)
+	if err != nil {
+		return plan, err
+	}
+	plan.Summary = e.summaryNeeded(ctx, day, set)
 	return plan, err
 }
 
@@ -304,6 +317,7 @@ func TriggerInstruction(kind string) string {
 	case CheckinEvening:
 		return strings.TrimSpace(`Evening check-in. Today's plans and what was logged are in <today>.
 Ask how today went, naming the plans still open in one short sentence.
+If <today> lists facts you noted today, list them in one line as "I noted: …" and ask if they are right.
 Use complete_task / log_activity / update_task to record what the user answers, and confirm what you recorded in one line.
 Only ask questions and reflect back what the user said. Do not give advice, tips or encouragement.
 If they answer nothing, accept it and stop; do not repeat the question.`)

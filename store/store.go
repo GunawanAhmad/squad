@@ -203,6 +203,21 @@ func (s *Store) Messages(ctx context.Context, conversationID string, after int64
 	return scanMessages(rows)
 }
 
+// AddMessageAt inserts a message with an explicit created_at. Used by seeds
+// and tests; the app itself always uses AddMessage.
+func (s *Store) AddMessageAt(ctx context.Context, m Message, at time.Time) (Message, error) {
+	row := s.pool.QueryRow(ctx, `
+		INSERT INTO messages (conversation_id, role, content, tool_calls, tool_call_id, run_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, created_at`,
+		m.ConversationID, m.Role, m.Content, m.ToolCalls, nullIfEmpty(m.ToolCallID), m.RunID, at)
+	if err := row.Scan(&m.ID, &m.CreatedAt); err != nil {
+		return Message{}, err
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE conversations SET updated_at = now() WHERE id = $1`, m.ConversationID)
+	return m, err
+}
+
 // GetMessage returns one message (to show where a fact came from, or to hide
 // it when the fact is forgotten).
 func (s *Store) GetMessage(ctx context.Context, id int64) (Message, error) {
@@ -324,4 +339,44 @@ func nullIfEmpty(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// RecentMessagesAfter returns the newest n messages with id > after, oldest
+// first. Used once a rolling summary covers the older part of a thread.
+func (s *Store) RecentMessagesAfter(ctx context.Context, conversationID string, after int64, n int) ([]Message, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT * FROM (
+			SELECT id, conversation_id, role, content, COALESCE(tool_calls, 'null'::jsonb),
+			       COALESCE(tool_call_id, ''), run_id, created_at, forgotten_at
+			FROM messages WHERE conversation_id = $1 AND id > $2 AND forgotten_at IS NULL
+			ORDER BY id DESC LIMIT $3
+		) t ORDER BY id`, conversationID, after, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMessages(rows)
+}
+
+// RunsByKind returns runs of one kind (close jobs have no conversation), for
+// traces and tests.
+func (s *Store) RunsByKind(ctx context.Context, kind string) ([]Run, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, kind, conversation_id, model, context, status, COALESCE(error, ''),
+		       input_tokens, output_tokens, started_at, ended_at
+		FROM runs WHERE kind = $1 ORDER BY id`, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Run
+	for rows.Next() {
+		var r Run
+		if err := rows.Scan(&r.ID, &r.Kind, &r.ConversationID, &r.Model, &r.Context, &r.Status,
+			&r.Error, &r.InputTokens, &r.OutputTokens, &r.StartedAt, &r.EndedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }

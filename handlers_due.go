@@ -39,15 +39,23 @@ func (s *server) handleDue(w http.ResponseWriter, r *http.Request) {
 		"busy":           s.engine.Busy(),
 	})
 
-	if plan.Checkin == "" {
-		return
+	if plan.Checkin != "" {
+		go func() {
+			// The request context ends with the response; the turn must not.
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 4*time.Minute)
+			defer cancel()
+			if res := s.engine.Execute(ctx, plan); res.Err != nil {
+				log.Printf("check-in %s: %v", plan.Checkin, res.Err)
+			}
+		}()
 	}
-	go func() {
-		// The request context ends with the response; the turn must not.
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 4*time.Minute)
-		defer cancel()
-		if res := s.engine.Execute(ctx, plan); res.Err != nil {
-			log.Printf("check-in %s: %v", plan.Checkin, res.Err)
-		}
-	}()
+	// Close jobs and the summary run separately: a slow job must never delay
+	// the check-in.
+	if len(plan.Close) > 0 || plan.Summary {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Minute)
+			defer cancel()
+			s.engine.ExecuteJobs(ctx, plan)
+		}()
+	}
 }

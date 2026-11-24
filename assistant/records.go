@@ -22,6 +22,7 @@ type Records struct {
 	TodayActivities []store.Activity
 	ActivityMore    int
 	TodayReminders  []store.Reminder
+	NotedFacts      []store.Fact // extracted today (about a past day)
 	Digest          []DaySummary // oldest first, at most 7
 }
 
@@ -51,6 +52,7 @@ type RecordsStore interface {
 	Activities(ctx context.Context, f store.ActivityFilter) ([]store.Activity, error)
 	Reminders(ctx context.Context, f store.ReminderFilter) ([]store.Reminder, error)
 	Projects(ctx context.Context) ([]store.Project, error)
+	NotedFacts(ctx context.Context, since time.Time, limit int) ([]store.Fact, error)
 }
 
 // LoadRecords reads one turn's (or one check-in's) records. A failure returns
@@ -99,6 +101,10 @@ func LoadRecords(ctx context.Context, rs RecordsStore, day time.Time, set Settin
 		for _, p := range projects {
 			rec.Projects = append(rec.Projects, p.Name)
 		}
+	}
+
+	if noted, err := rs.NotedFacts(ctx, dayStart, 8); err == nil {
+		rec.NotedFacts = noted
 	}
 
 	rec.Digest = loadDigest(ctx, rs, rec.Day, set)
@@ -168,6 +174,13 @@ func loadDigest(ctx context.Context, rs RecordsStore, day time.Time, set Setting
 // cannot crowd out the conversation. The model can call list_tasks or
 // query_activities for the rest.
 func (r Records) Prompt(loc *time.Location, dayStartsAt time.Duration, now time.Time) string {
+	today, digest := r.PromptParts(loc, dayStartsAt, now)
+	return today + digest
+}
+
+// PromptParts splits the section so the context builder can budget today and
+// the digest separately (and log exactly which part was cut).
+func (r Records) PromptParts(loc *time.Location, dayStartsAt time.Duration, now time.Time) (string, string) {
 	var b strings.Builder
 	b.WriteString("\n<today>\n")
 	fmt.Fprintf(&b, "The current day runs %s to %s (%s): anything before %s belongs to the previous day.\n",
@@ -207,6 +220,13 @@ func (r Records) Prompt(loc *time.Location, dayStartsAt time.Duration, now time.
 		}
 	}
 
+	if len(r.NotedFacts) > 0 {
+		b.WriteString("Facts noted today (extracted from past conversations; the user can correct them):\n")
+		for _, f := range r.NotedFacts {
+			fmt.Fprintf(&b, "- #%d (%s, since %s) %s\n", f.ID, f.Category, store.DayString(f.ValidFrom), f.Text)
+		}
+	}
+
 	if len(r.TodayReminders) > 0 {
 		fmt.Fprintf(&b, "Reminders still pending today:\n")
 		for _, rem := range r.TodayReminders {
@@ -214,37 +234,40 @@ func (r Records) Prompt(loc *time.Location, dayStartsAt time.Duration, now time.
 		}
 	}
 	b.WriteString("</today>\n")
+	today := b.String()
 
-	if len(r.Digest) > 0 {
-		b.WriteString("\n<recent_days>\n")
-		b.WriteString("The last seven days, from records. Use this to reflect back; it is not advice.\n")
-		for _, d := range r.Digest {
-			fmt.Fprintf(&b, "%s (%s):", store.DayString(d.Day), d.Day.Format("Monday"))
-			if len(d.Activities) > 0 {
-				var items []string
-				for i, a := range d.Activities {
-					if i == maxDayActivities {
-						items = append(items, fmt.Sprintf("and %d more", len(d.Activities)-maxDayActivities))
-						break
-					}
-					items = append(items, tools.ActivityLine(a))
-				}
-				fmt.Fprintf(&b, " did %s;", strings.Join(items, "; "))
-			}
-			if len(d.Completed) > 0 {
-				fmt.Fprintf(&b, " completed %s;", taskTitles(d.Completed, maxDayTasks))
-			}
-			if len(d.Dropped) > 0 {
-				fmt.Fprintf(&b, " dropped %s;", taskTitles(d.Dropped, maxDayTasks))
-			}
-			if len(d.Slipped) > 0 {
-				fmt.Fprintf(&b, " still open from that day: %s;", taskTitles(d.Slipped, maxDayTasks))
-			}
-			b.WriteString("\n")
-		}
-		b.WriteString("</recent_days>\n")
+	if len(r.Digest) == 0 {
+		return today, ""
 	}
-	return b.String()
+	b.Reset()
+	b.WriteString("\n<recent_days>\n")
+	b.WriteString("The last seven days, from records. Use this to reflect back; it is not advice.\n")
+	for _, d := range r.Digest {
+		fmt.Fprintf(&b, "%s (%s):", store.DayString(d.Day), d.Day.Format("Monday"))
+		if len(d.Activities) > 0 {
+			var items []string
+			for i, a := range d.Activities {
+				if i == maxDayActivities {
+					items = append(items, fmt.Sprintf("and %d more", len(d.Activities)-maxDayActivities))
+					break
+				}
+				items = append(items, tools.ActivityLine(a))
+			}
+			fmt.Fprintf(&b, " did %s;", strings.Join(items, "; "))
+		}
+		if len(d.Completed) > 0 {
+			fmt.Fprintf(&b, " completed %s;", taskTitles(d.Completed, maxDayTasks))
+		}
+		if len(d.Dropped) > 0 {
+			fmt.Fprintf(&b, " dropped %s;", taskTitles(d.Dropped, maxDayTasks))
+		}
+		if len(d.Slipped) > 0 {
+			fmt.Fprintf(&b, " still open from that day: %s;", taskTitles(d.Slipped, maxDayTasks))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("</recent_days>\n")
+	return today, b.String()
 }
 
 func taskTitles(tasks []store.Task, max int) string {
