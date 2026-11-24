@@ -186,10 +186,10 @@
     },
     "model": "deepseek-v4.1-flash",
     "models": [
-      "claude/opus",
-      "claude/sonnet",
-      "claude/haiku",
-      "deepseek-v4.1-flash"
+      "deepseek-v4.1-flash",
+      "deepseek-v4-pro",
+      "claude-haiku-5-5",
+      "qwen3.8-max"
     ],
     "context": "profile",
     "tools": [

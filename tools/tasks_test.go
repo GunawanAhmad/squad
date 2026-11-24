@@ -200,3 +200,23 @@ func TestTaskDaysFollowTheLogicalDay(t *testing.T) {
 		t.Fatalf("planned_on = %v, want 2026-11-30", tasks[0].PlannedOn)
 	}
 }
+
+func TestParseDayWeekdays(t *testing.T) {
+	base := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC) // Tuesday
+	cases := map[string]time.Time{
+		"today":      time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC),
+		"tomorrow":   time.Date(2026, 12, 2, 0, 0, 0, 0, time.UTC),
+		"yesterday":  time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC),
+		"Monday":     time.Date(2026, 12, 7, 0, 0, 0, 0, time.UTC), // next Monday, not today
+		"2026-12-05": time.Date(2026, 12, 5, 0, 0, 0, 0, time.UTC),
+	}
+	for in, want := range cases {
+		got, err := tools.ParseDay(in, base)
+		if err != nil || !got.Equal(want) {
+			t.Fatalf("ParseDay(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	if _, err := tools.ParseDay("someday", base); !errors.Is(err, tools.ErrInvalid) {
+		t.Fatalf("bad day: %v", err)
+	}
+}
