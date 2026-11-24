@@ -187,7 +187,15 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	if r.memory != nil {
 		memory = r.memory(req.Character.ID)
 	}
-	cctx := BuildContext(req.Character, memory, r.now(), r.loc, history, r.window)
+	now := r.now()
+	set := r.settingsFor(ctx)
+	day := LogicalDay(now, set.Loc, set.DayStartsAt)
+	var records *Records
+	if rs, ok := r.store.(RecordsStore); ok && req.Character.Daily {
+		loaded := LoadRecords(ctx, rs, day, set)
+		records = &loaded
+	}
+	cctx := BuildContext(req.Character, memory, history, r.window, now, set, records)
 
 	trace, _ := json.Marshal(contextTrace{
 		Sections:    cctx.Sections,
@@ -221,11 +229,10 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	result.UserMessageID = userMsg.ID
 
 	msgs := append(cctx.Messages, llm.Message{Role: role, Content: req.Input})
-	set := r.settingsFor(ctx)
 	env := tools.Env{
 		CharacterID: req.Character.ID, ConversationID: conv.ID,
-		Allowed: req.Character.Tools, Now: r.now(),
-		DB: r.db, Loc: set.Loc, Day: LogicalDay(r.now(), set.Loc, set.DayStartsAt),
+		Allowed: req.Character.Tools, Now: now,
+		DB: r.db, Loc: set.Loc, Day: day,
 		SourceMessageID: &userMsg.ID,
 	}
 

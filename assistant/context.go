@@ -19,6 +19,9 @@ type Character struct {
 	Model    string
 	Persona  string
 	Tools    []string
+	// Daily marks the assistant: it gets the day's records in context and
+	// lives in one thread per day. Personas never see the user's day.
+	Daily bool
 }
 
 // Context is the prompt for one turn: the system text and the recent history
@@ -31,11 +34,16 @@ type Context struct {
 	Window     int
 }
 
-// BuildContext assembles persona, memory, clock and the last window messages.
-// The window is cut at a user turn so tool call/result pairs stay together.
-func BuildContext(char Character, memory string, now time.Time, loc *time.Location, history []store.Message, window int) Context {
+// BuildContext assembles persona, memory, the day's records, the clock and the
+// last window messages. The window is cut at a user turn so tool call/result
+// pairs stay together. rec may be nil (a persona chat has no daily records).
+func BuildContext(char Character, memory string, history []store.Message, window int, now time.Time, set Settings, rec *Records) Context {
 	if window <= 0 {
 		window = DefaultWindow
+	}
+	loc := set.Loc
+	if loc == nil {
+		loc = time.UTC
 	}
 
 	var sections []string
@@ -44,6 +52,13 @@ func BuildContext(char Character, memory string, now time.Time, loc *time.Locati
 	if strings.TrimSpace(memory) != "" {
 		system += "\n\n" + memory
 		sections = append(sections, "memory")
+	}
+	if rec != nil {
+		system += rec.Prompt(loc, set.DayStartsAt, now)
+		sections = append(sections, "today")
+		if len(rec.Digest) > 0 {
+			sections = append(sections, "recent_days")
+		}
 	}
 	system += NowBlock(now, loc)
 	sections = append(sections, "now")

@@ -1,5 +1,5 @@
 {
-  "system": "You are Ria.\nCite sources.\n\n\u003cmemory\u003e\nNotes may be outdated. The current messages win.\n\u003c/memory\u003e\n\u003cnow\u003e\nCurrent local date and time: Tuesday, 1 December 2026, 17:30\nTime zone: Asia/Makassar (UTC+8:00)\nIf asked for the date or time, answer from this.\n\u003c/now\u003e\n",
+  "system": "You are Ria.\nCite sources.\n\n\u003cmemory\u003e\nNotes may be outdated. The current messages win.\n\u003c/memory\u003e\n\u003ctoday\u003e\nThe current day runs 04:00 to 04:00 (Tuesday 1 December 2026): anything before 04:00 belongs to the previous day.\nNow: 17:30\nProjects: assistant, work\nPlans for today (1):\n- #5 write tests (2026-12-01)\nOpen plans from earlier days (oldest first, up to 15):\n- #2 finish the report (2026-11-28, moved 2x)\nLogged today (1):\n- api refactor (120 min)\nReminders still pending today:\n- call mom at 15:00\n\u003c/today\u003e\n\n\u003crecent_days\u003e\nThe last seven days, from records. Use this to reflect back; it is not advice.\n2026-11-30 (Monday): did prod bug (30 min); completed ship it; still open from that day: old thing;\n\u003c/recent_days\u003e\n\n\u003cnow\u003e\nCurrent local date and time: Tuesday, 1 December 2026, 17:30\nTime zone: Asia/Makassar (UTC+8:00)\nIf asked for the date or time, answer from this.\n\u003c/now\u003e\n",
   "messages": [
     {
       "Role": "user",
@@ -53,6 +53,8 @@
   "sections": [
     "persona",
     "memory",
+    "today",
+    "recent_days",
     "now",
     "history"
   ],

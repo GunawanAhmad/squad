@@ -403,3 +403,29 @@ func TestTurnRecordsUndoAndToolCallID(t *testing.T) {
 		t.Fatalf("tool event has no call id: %+v", (*events)[0])
 	}
 }
+
+func TestOnlyTheAssistantGetsDailyRecords(t *testing.T) {
+	st := storetest.New(t)
+	r, fake := testRunner(st, llm.FakeStep{Text: "persona reply"}, llm.FakeStep{Text: "assistant reply"})
+	ctx := context.Background()
+
+	if _, err := r.Turn(ctx, TurnRequest{ConversationID: "persona", Character: testChar, Input: "hi"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	assistantChar := testChar
+	assistantChar.ID, assistantChar.Daily = "assistant", true
+	if _, err := r.Turn(ctx, TurnRequest{ConversationID: "daily", Character: assistantChar, Input: "hi"}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	reqs := fake.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests: %d", len(reqs))
+	}
+	if strings.Contains(reqs[0].System, "<today>") {
+		t.Fatalf("persona got the user's day:\n%s", reqs[0].System)
+	}
+	if !strings.Contains(reqs[1].System, "<today>") || !strings.Contains(reqs[1].System, "The current day runs 04:00") {
+		t.Fatalf("assistant context missing today section:\n%s", reqs[1].System)
+	}
+}
