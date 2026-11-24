@@ -83,6 +83,14 @@ func TestConversationsAndMessages(t *testing.T) {
 		t.Fatalf("after %d: %+v", m1.ID, after)
 	}
 
+	newest, err := s.Messages(ctx, "conv-1", 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(newest) != 1 || newest[0].ID != m2.ID {
+		t.Fatalf("newest page: %+v", newest)
+	}
+
 	recent, err := s.RecentMessages(ctx, "conv-1", 1)
 	if err != nil {
 		t.Fatal(err)

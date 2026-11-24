@@ -125,7 +125,7 @@ function useConversation(id: string) {
 }
 
 async function loadMessages(id: string): Promise<boolean> {
-  const res = await fetch(`/api/conversations/${id}/messages`);
+  const res = await fetch(`/api/conversations/${id}/messages?limit=1000`);
   if (res.status === 404) {
     messages.value = [];
     return false;

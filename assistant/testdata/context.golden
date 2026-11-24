@@ -1,0 +1,60 @@
+{
+  "system": "You are Ria.\nCite sources.\n\n\u003cmemory\u003e\nNotes may be outdated. The current messages win.\n\u003c/memory\u003e\n\u003cnow\u003e\nCurrent local date and time: Tuesday, 1 December 2026, 17:30\nTime zone: Asia/Makassar (UTC+8:00)\nIf asked for the date or time, answer from this.\n\u003c/now\u003e\n",
+  "messages": [
+    {
+      "Role": "user",
+      "Content": "older question",
+      "ToolCalls": null,
+      "ToolCallID": "",
+      "Reasoning": ""
+    },
+    {
+      "Role": "assistant",
+      "Content": "",
+      "ToolCalls": [
+        {
+          "id": "call_1",
+          "name": "web_search",
+          "arguments": "{\"query\":\"go\"}"
+        }
+      ],
+      "ToolCallID": "",
+      "Reasoning": ""
+    },
+    {
+      "Role": "tool",
+      "Content": "search results",
+      "ToolCalls": null,
+      "ToolCallID": "call_1",
+      "Reasoning": ""
+    },
+    {
+      "Role": "assistant",
+      "Content": "older answer",
+      "ToolCalls": null,
+      "ToolCallID": "",
+      "Reasoning": ""
+    },
+    {
+      "Role": "user",
+      "Content": "new question",
+      "ToolCalls": null,
+      "ToolCallID": "",
+      "Reasoning": ""
+    }
+  ],
+  "message_ids": [
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "sections": [
+    "persona",
+    "memory",
+    "now",
+    "history"
+  ],
+  "window": 5
+}

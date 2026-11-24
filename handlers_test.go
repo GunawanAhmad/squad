@@ -93,7 +93,11 @@ func (m *memStore) Messages(_ context.Context, convID string, after int64, limit
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	if limit > 0 && len(out) > limit {
-		out = out[:limit]
+		if after == 0 {
+			out = out[len(out)-limit:] // newest page, matching the real store
+		} else {
+			out = out[:limit]
+		}
 	}
 	return out, nil
 }
@@ -297,8 +301,8 @@ func TestAPIConversationLifecycle(t *testing.T) {
 	}
 
 	w = doJSON(t, h, "GET", "/api/conversations/"+id+"/messages?limit=1", "")
-	if !strings.Contains(w.Body.String(), `"role":"user"`) {
-		t.Fatalf("limit ignored: %s", w.Body)
+	if !strings.Contains(w.Body.String(), `"role":"assistant"`) {
+		t.Fatalf("limit=1 should return the newest message: %s", w.Body)
 	}
 }
 

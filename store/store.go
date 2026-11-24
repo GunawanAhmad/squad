@@ -171,16 +171,31 @@ func (s *Store) AddMessage(ctx context.Context, m Message) (Message, error) {
 	return m, err
 }
 
-// Messages returns messages after the given id (0 = from the start), oldest
-// first. limit <= 0 means no limit.
+// Messages returns messages oldest first. With after=0 and a positive limit it
+// returns the newest page (so a long chat opens at the present, not the past);
+// with after>0 it returns the next page after that id. limit <= 0 means all.
 func (s *Store) Messages(ctx context.Context, conversationID string, after int64, limit int) ([]Message, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, conversation_id, role, content, COALESCE(tool_calls, 'null'::jsonb),
-		       COALESCE(tool_call_id, ''), run_id, created_at, forgotten_at
-		FROM messages
-		WHERE conversation_id = $1 AND id > $2
-		ORDER BY id
-		LIMIT CASE WHEN $3 > 0 THEN $3 END`, conversationID, after, limit)
+	const cols = `id, conversation_id, role, content, COALESCE(tool_calls, 'null'::jsonb),
+		COALESCE(tool_call_id, ''), run_id, created_at, forgotten_at`
+
+	var rows pgx.Rows
+	var err error
+	if after == 0 && limit > 0 {
+		rows, err = s.pool.Query(ctx, `
+			SELECT * FROM (
+				SELECT id, conversation_id, role, content,
+				       COALESCE(tool_calls, 'null'::jsonb) AS tool_calls,
+				       COALESCE(tool_call_id, '') AS tool_call_id,
+				       run_id, created_at, forgotten_at
+				FROM messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT $2
+			) t ORDER BY id`, conversationID, limit)
+	} else {
+		rows, err = s.pool.Query(ctx, `
+			SELECT `+cols+` FROM messages
+			WHERE conversation_id = $1 AND id > $2
+			ORDER BY id
+			LIMIT CASE WHEN $3 > 0 THEN $3 END`, conversationID, after, limit)
+	}
 	if err != nil {
 		return nil, err
 	}
