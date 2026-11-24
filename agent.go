@@ -1,19 +1,14 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
+	"characters/llm"
 )
 
 const maxSteps = 10
@@ -27,14 +22,14 @@ type event struct {
 }
 
 // Created lazily so .env is loaded first.
-var client = sync.OnceValue(func() *openai.Client {
-	c := openai.NewClient(
-		option.WithBaseURL(envOr("OPENCODE_BASE_URL", "https://opencode.ai/inference/go/openai/v1")),
-		option.WithAPIKey(os.Getenv("OPENCODE_API_KEY")),
-		option.WithHeader("User-Agent", "characters/0.1"),
+var openCodeModel = sync.OnceValue(func() llm.Model {
+	return llm.NewOpenCode(
+		os.Getenv("OPENCODE_API_KEY"),
+		envOr("OPENCODE_BASE_URL", "https://opencode.ai/inference/go/openai/v1"),
 	)
-	return &c
 })
+
+var claudeModel = sync.OnceValue(func() llm.Model { return llm.NewClaude() })
 
 func loadSystemPrompt(c Character) string {
 	memory := memoryPrompt(c)
@@ -42,173 +37,73 @@ func loadSystemPrompt(c Character) string {
 
 	// Can we not trim everything before send this?
 	if strings.TrimSpace(memory) != "" {
-		sysPrompt = fmt.Sprintf("%s\n\n%s", c.Persona, memory)
+		sysPrompt = c.Persona + "\n\n" + memory
 	}
 
 	return sysPrompt + nowBlock(time.Now(), timeZone())
 }
 
+// Tool specs are mapped here until the typed registry lands (F-6).
+func specsFor(c Character) []llm.ToolSpec {
+	var out []llm.ToolSpec
+	for _, name := range c.Tools {
+		spec, ok := toolSpecs[name]
+		if !ok {
+			continue
+		}
+		params, _ := json.Marshal(spec.Parameters)
+		out = append(out, llm.ToolSpec{Name: name, Description: spec.Description.Value, Parameters: params})
+	}
+	return out
+}
+
+// runChat is the old /api/chat loop. F-7 moves it to assistant.Turn and F-9
+// deletes this path; until then it keeps characters working on the new adapters.
 func runChat(ctx context.Context, c Character, sessionID string, history []chatMsg, send func(event)) error {
-	msgs := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(loadSystemPrompt(c))}
+	msgs := make([]llm.Message, 0, len(history))
 	for _, m := range history {
-		if m.Role == "user" {
-			msgs = append(msgs, openai.UserMessage(m.Content))
-		} else {
-			msgs = append(msgs, openai.AssistantMessage(m.Content))
-		}
+		msgs = append(msgs, llm.Message{Role: m.Role, Content: m.Content})
 	}
 
-	params := openai.ChatCompletionNewParams{Model: c.Model, Messages: msgs}
-	for _, t := range c.Tools {
-		params.Tools = append(params.Tools, openai.ChatCompletionFunctionTool(toolSpecs[t]))
-	}
-
+	system := loadSystemPrompt(c)
+	specs := specsFor(c)
 	for range maxSteps {
-		stream := client().Chat.Completions.NewStreaming(ctx, params, option.WithHeader("x-opencode-session", sessionID))
-		acc := openai.ChatCompletionAccumulator{}
-		var reasoning strings.Builder
-		for stream.Next() {
-			chunk := stream.Current()
-			if !acc.AddChunk(chunk) {
-				err := stream.Close()
-				if err != nil {
-					return err
-				}
-
-				return errors.New("model stream sent an inconsistent chunk")
-			}
-
-			if len(chunk.Choices) == 0 {
-				continue
-			}
-
-			d := chunk.Choices[0].Delta
-			if d.Content != "" {
-				send(event{Type: "text", Delta: d.Content})
-			}
-
-			// Reasoning models stream their thinking here; hidden from UI but sent back during tool loops.
-			if f, ok := d.JSON.ExtraFields["reasoning_content"]; ok {
-				var s string
-				if json.Unmarshal([]byte(f.Raw()), &s) == nil {
-					reasoning.WriteString(s)
-				}
-			}
-		}
-
-		err := stream.Err()
+		resp, err := openCodeModel().Stream(ctx, llm.Request{
+			Model: c.Model, System: system, Messages: msgs, Tools: specs, Session: sessionID,
+		}, func(text string) {
+			send(event{Type: "text", Delta: text})
+		})
 		if err != nil {
 			return err
 		}
-
-		err = stream.Close()
-		if err != nil {
-			return err
-		}
-
-		if len(acc.Choices) == 0 {
-			return errors.New("empty response from model")
-		}
-
-		msg := acc.Choices[0].Message
-		if len(msg.ToolCalls) == 0 {
+		if len(resp.ToolCalls) == 0 {
 			return nil
 		}
 
-		asst := msg.ToAssistantMessageParam()
-
-		if reasoning.Len() > 0 {
-			asst.SetExtraFields(map[string]any{"reasoning_content": reasoning.String()})
-		}
-
-		params.Messages = append(params.Messages, openai.ChatCompletionMessageParamUnion{OfAssistant: &asst})
-		for _, tc := range msg.ToolCalls {
-			send(event{Type: "tool", Name: tc.Function.Name, Args: tc.Function.Arguments})
-			params.Messages = append(params.Messages, openai.ToolMessage(runTool(ctx, c, tc.Function.Name, tc.Function.Arguments), tc.ID))
+		msgs = append(msgs, llm.Message{
+			Role: "assistant", Content: resp.Text, ToolCalls: resp.ToolCalls, Reasoning: resp.Reasoning,
+		})
+		for _, tc := range resp.ToolCalls {
+			send(event{Type: "tool", Name: tc.Name, Args: tc.Arguments})
+			msgs = append(msgs, llm.Message{
+				Role: "tool", ToolCallID: tc.ID, Content: runTool(ctx, c, tc.Name, tc.Arguments),
+			})
 		}
 	}
 	send(event{Type: "text", Delta: "\n\n(stopped: too many tool steps)"})
 	return nil
 }
 
-func transcript(history []chatMsg) string {
-	if len(history) == 1 {
-		return history[0].Content
-	}
-
-	var b strings.Builder
-	b.WriteString("<conversation>\n\n")
-	b.WriteString("Conversation so far:\n\n")
-
-	for _, m := range history[:len(history)-1] {
-		role := "User"
-		if m.Role == "assistant" {
-			role = "You"
-		}
-		fmt.Fprintf(&b, "%s: %s\n\n", role, m.Content)
-	}
-
-	b.WriteString("Reply to the user's latest message:\n\n")
-	b.WriteString(history[len(history)-1].Content)
-	b.WriteString("\n\n</conversation>\n")
-
-	return b.String()
-}
-
 func runClaude(ctx context.Context, c Character, _ string, history []chatMsg, send func(event)) error {
-	cmd := exec.CommandContext(ctx, "claude", "-p",
-		"--output-format", "stream-json", "--verbose", "--include-partial-messages",
-		"--system-prompt", loadSystemPrompt(c), // replaces Claude Code's own prompt
-		"--model", c.Model,
-		"--tools", "WebSearch,WebFetch", // nothing else: no shell, no file access
-		"--allowedTools", "WebSearch,WebFetch", // no permission prompts in -p mode
-		"--setting-sources", "project", // skip your ~/.claude hooks and plugins
-		"--strict-mcp-config", // skip your MCP servers
-		"--no-session-persistence",
-	)
-
-	tmpDir := os.TempDir()
-	cmd.Dir = tmpDir
-	cmd.Env = []string{}
-	cmd.Stdin = strings.NewReader(transcript(history))
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
+	msgs := make([]llm.Message, 0, len(history))
+	for _, m := range history {
+		msgs = append(msgs, llm.Message{Role: m.Role, Content: m.Content})
 	}
 
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	sc := bufio.NewScanner(out)
-	if sc.Err() != nil {
-		return sc.Err()
-	}
-
-	sc.Buffer(nil, 10<<20) // tool results can be long lines
-	for sc.Scan() {
-		var line struct {
-			Type  string `json:"type"`
-			Event struct {
-				Type  string `json:"type"`
-				Delta struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				} `json:"delta"`
-			} `json:"event"`
-			IsError bool   `json:"is_error"`
-			Result  string `json:"result"`
-		}
-		if json.Unmarshal(sc.Bytes(), &line) != nil {
-			continue // skip anything that isn't a JSON line
-		}
-
-		switch {
-		case line.Type == "stream_event" && line.Event.Delta.Type == "text_delta":
-			send(event{Type: "text", Delta: line.Event.Delta.Text})
-		case line.Type == "result" && line.IsError:
-			send(event{Type: "error", Message: line.Result})
-		}
-	}
-	return cmd.Wait()
+	_, err := claudeModel().Stream(ctx, llm.Request{
+		Model: c.Model, System: loadSystemPrompt(c), Messages: msgs,
+	}, func(text string) {
+		send(event{Type: "text", Delta: text})
+	})
+	return err
 }
