@@ -6,3 +6,23 @@ services:
     volumes:
       - ./searxng:/etc/searxng
     restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    ports:
+      - "127.0.0.1:5432:5432" # localhost only: never 0.0.0.0, published ports bypass the host firewall
+    environment:
+      POSTGRES_USER: characters
+      POSTGRES_PASSWORD: characters
+      POSTGRES_DB: characters
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U characters -d characters"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata: # named volume; `docker compose down -v` deletes it
