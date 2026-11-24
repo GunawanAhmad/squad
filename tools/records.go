@@ -154,7 +154,7 @@ func validateRepeat(repeat string) (string, error) {
 }
 
 // CreateTask validates and inserts one plan.
-func CreateTask(ctx context.Context, db *store.Store, title, notes, plannedOn, project string, day time.Time, toolCallID *int64) (store.Task, error) {
+func CreateTask(ctx context.Context, db *store.Store, title, notes, plannedOn, project string, day time.Time, toolCallID, sourceMessageID *int64) (store.Task, error) {
 	title, err := validateTitle(title)
 	if err != nil {
 		return store.Task{}, err
@@ -168,7 +168,7 @@ func CreateTask(ctx context.Context, db *store.Store, title, notes, plannedOn, p
 			return store.Task{}, err
 		}
 	}
-	t := store.Task{Title: title, Notes: notes, PlannedOn: &planned, ToolCallID: toolCallID}
+	t := store.Task{Title: title, Notes: notes, PlannedOn: &planned, ToolCallID: toolCallID, SourceMessageID: sourceMessageID}
 	if strings.TrimSpace(project) != "" {
 		p, err := db.EnsureProject(ctx, project)
 		if err != nil {
@@ -341,7 +341,7 @@ func TaskLine(t store.Task, loc *time.Location) string {
 
 // AddActivity validates and inserts one "what I did" row. Minutes stay nil
 // when the user did not say: the assistant never guesses durations.
-func AddActivity(ctx context.Context, db *store.Store, description string, minutes *int, onDay, project string, day time.Time, toolCallID *int64) (store.Activity, error) {
+func AddActivity(ctx context.Context, db *store.Store, description string, minutes *int, onDay, project string, day time.Time, toolCallID, sourceMessageID *int64) (store.Activity, error) {
 	description = strings.TrimSpace(description)
 	if description == "" {
 		return store.Activity{}, fmt.Errorf("%w: description is required", ErrInvalid)
@@ -359,7 +359,7 @@ func AddActivity(ctx context.Context, db *store.Store, description string, minut
 			return store.Activity{}, err
 		}
 	}
-	a := store.Activity{Day: d, Description: description, Minutes: minutes, ToolCallID: toolCallID}
+	a := store.Activity{Day: d, Description: description, Minutes: minutes, ToolCallID: toolCallID, SourceMessageID: sourceMessageID}
 	if strings.TrimSpace(project) != "" {
 		p, err := db.EnsureProject(ctx, project)
 		if err != nil {

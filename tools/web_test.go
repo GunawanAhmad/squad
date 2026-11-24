@@ -102,7 +102,7 @@ func TestWebSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "1. Go") || !strings.Contains(out, "https://go.dev") || !strings.Contains(out, "The Go language") {
-		t.Fatalf("search output: %q", out)
+	if !strings.Contains(out.Text, "1. Go") || !strings.Contains(out.Text, "https://go.dev") || !strings.Contains(out.Text, "The Go language") {
+		t.Fatalf("search output: %q", out.Text)
 	}
 }

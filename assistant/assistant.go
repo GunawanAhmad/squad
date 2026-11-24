@@ -36,7 +36,8 @@ type Store interface {
 	RecentMessages(ctx context.Context, conversationID string, n int) ([]store.Message, error)
 	StartRun(ctx context.Context, r store.Run) (int64, error)
 	FinishRun(ctx context.Context, id int64, status, errMsg string, inputTokens, outputTokens *int) error
-	AddToolCall(ctx context.Context, tc store.ToolCall) (store.ToolCall, error)
+	StartToolCall(ctx context.Context, tc store.ToolCall) (store.ToolCall, error)
+	FinishToolCall(ctx context.Context, id int64, result string, undo []byte, status string) error
 }
 
 type Config struct {
@@ -51,6 +52,10 @@ type Config struct {
 	// BeforeTurn runs before the turn proceeds (e.g. the lazy daily backup).
 	// It must not fail the turn; errors are the hook's own business.
 	BeforeTurn func(ctx context.Context)
+	// DB is handed to domain tools; nil means only web tools work (unit tests).
+	DB *store.Store
+	// Settings reads settings.tz and the day boundary; nil means defaults.
+	Settings func(ctx context.Context) Settings
 }
 
 type Runner struct {
@@ -64,6 +69,8 @@ type Runner struct {
 	maxSteps int
 
 	beforeTurn func(context.Context)
+	db         *store.Store
+	settings   func(context.Context) Settings
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
@@ -80,6 +87,8 @@ func New(cfg Config) *Runner {
 		window:     cfg.Window,
 		maxSteps:   cfg.MaxSteps,
 		beforeTurn: cfg.BeforeTurn,
+		db:         cfg.DB,
+		settings:   cfg.Settings,
 		locks:      map[string]*sync.Mutex{},
 	}
 	if r.tools == nil {
@@ -106,6 +115,7 @@ type TurnRequest struct {
 	Input          string
 	Model          string // resolved picker model; empty means Character.Model
 	Kind           string // runs.kind; empty means "turn"
+	Role           string // stored role of Input: user (default) or trigger (check-ins)
 }
 
 // Event mirrors the NDJSON the frontend already knows.
@@ -115,6 +125,7 @@ type Event struct {
 	Name    string `json:"name,omitempty"`
 	Args    string `json:"args,omitempty"`
 	Message string `json:"message,omitempty"`
+	ID      int64  `json:"id,omitempty"` // tool_calls row, for the Undo button
 }
 
 type Result struct {
@@ -196,8 +207,12 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	}
 
 	result := Result{ConversationID: conv.ID, RunID: runID, Status: StatusRunning}
+	role := req.Role
+	if role == "" {
+		role = "user"
+	}
 	userMsg, err := r.store.AddMessage(ctx, store.Message{
-		ConversationID: conv.ID, Role: "user", Content: req.Input, RunID: &runID,
+		ConversationID: conv.ID, Role: role, Content: req.Input, RunID: &runID,
 	})
 	if err != nil {
 		r.finish(ctx, runID, StatusError, err.Error(), llm.Usage{})
@@ -205,10 +220,13 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	}
 	result.UserMessageID = userMsg.ID
 
-	msgs := append(cctx.Messages, llm.Message{Role: "user", Content: req.Input})
+	msgs := append(cctx.Messages, llm.Message{Role: role, Content: req.Input})
+	set := r.settingsFor(ctx)
 	env := tools.Env{
 		CharacterID: req.Character.ID, ConversationID: conv.ID,
 		Allowed: req.Character.Tools, Now: r.now(),
+		DB: r.db, Loc: set.Loc, Day: LogicalDay(r.now(), set.Loc, set.DayStartsAt),
+		SourceMessageID: &userMsg.ID,
 	}
 
 	var usage llm.Usage
@@ -268,28 +286,45 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 			Role: "assistant", Content: resp.Text, ToolCalls: resp.ToolCalls, Reasoning: resp.Reasoning,
 		})
 		for _, tc := range resp.ToolCalls {
-			emit(Event{Type: "tool", Name: tc.Name, Args: tc.Arguments})
-			out, toolErr := r.tools.Run(ctx, env, tc.Name, tc.Arguments)
-			status := "ok"
+			// The row exists before the tool runs, so a write tool can stamp the
+			// records it creates with this id (the Today panel's undo key).
+			call, err := r.store.StartToolCall(ctx, store.ToolCall{
+				RunID: runID, Name: tc.Name, Args: traceArgs(tc.Arguments),
+			})
+			if err != nil {
+				r.finish(ctx, runID, StatusError, err.Error(), usage)
+				result.Status = StatusError
+				return result, err
+			}
+			emit(Event{Type: "tool", Name: tc.Name, Args: tc.Arguments, ID: call.ID})
+
+			env.ToolCallID = call.ID
+			res, toolErr := r.tools.Run(ctx, env, tc.Name, tc.Arguments)
+			status, out := "ok", res.Text
+			var undo []byte
 			if toolErr != nil {
 				status = "error"
 				out = "error: " + toolErr.Error()
+			} else if len(res.Undo) > 0 {
+				undo, _ = json.Marshal(res.Undo)
 			}
-			if _, err := r.store.AddToolCall(ctx, store.ToolCall{
-				RunID: runID, Name: tc.Name, Args: traceArgs(tc.Arguments), Result: out, Status: status,
-			}); err != nil {
+			if err := r.store.FinishToolCall(ctx, call.ID, out, undo, status); err != nil {
 				r.finish(ctx, runID, StatusError, err.Error(), usage)
 				result.Status = StatusError
 				return result, err
+			}
+			content := out
+			if undo != nil {
+				content += fmt.Sprintf("\n\n(undo: tool_call_id=%d)", call.ID)
 			}
 			if _, err := r.store.AddMessage(ctx, store.Message{
-				ConversationID: conv.ID, Role: "tool", Content: out, ToolCallID: tc.ID, RunID: &runID,
+				ConversationID: conv.ID, Role: "tool", Content: content, ToolCallID: tc.ID, RunID: &runID,
 			}); err != nil {
 				r.finish(ctx, runID, StatusError, err.Error(), usage)
 				result.Status = StatusError
 				return result, err
 			}
-			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: out})
+			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: content})
 		}
 	}
 
@@ -316,6 +351,24 @@ func (r *Runner) modelFor(provider string) (llm.Model, error) {
 		return nil, fmt.Errorf("no model adapter for provider %q", provider)
 	}
 	return m, nil
+}
+
+// settingsFor is the runner's view of settings.tz and the day boundary.
+func (r *Runner) settingsFor(ctx context.Context) Settings {
+	if r.settings != nil {
+		return r.settings(ctx)
+	}
+	set := DefaultSettings()
+	if r.loc != nil {
+		set.Loc, set.TZ = r.loc, r.loc.String()
+	}
+	return set
+}
+
+// Day is the logical day of now (used by tools and the context builder).
+func (r *Runner) Day(ctx context.Context) time.Time {
+	set := r.settingsFor(ctx)
+	return LogicalDay(r.now(), set.Loc, set.DayStartsAt)
 }
 
 func (r *Runner) lockFor(conversationID string) *sync.Mutex {

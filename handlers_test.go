@@ -135,7 +135,7 @@ func (m *memStore) FinishRun(_ context.Context, id int64, status, errMsg string,
 	return nil
 }
 
-func (m *memStore) AddToolCall(_ context.Context, tc store.ToolCall) (store.ToolCall, error) {
+func (m *memStore) StartToolCall(_ context.Context, tc store.ToolCall) (store.ToolCall, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.nextCall++
@@ -143,6 +143,17 @@ func (m *memStore) AddToolCall(_ context.Context, tc store.ToolCall) (store.Tool
 	tc.CreatedAt = time.Now()
 	m.calls = append(m.calls, tc)
 	return tc, nil
+}
+
+func (m *memStore) FinishToolCall(_ context.Context, id int64, result string, undo []byte, status string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.calls {
+		if m.calls[i].ID == id {
+			m.calls[i].Result, m.calls[i].Undo, m.calls[i].Status = result, undo, status
+		}
+	}
+	return nil
 }
 
 func (m *memStore) snapshot() (msgs []store.Message, runs []store.Run, calls []store.ToolCall) {
@@ -156,8 +167,8 @@ func testServer(steps ...llm.FakeStep) (*server, *memStore, *llm.Fake) {
 	reg.Add(&tools.Tool{
 		Name: "echo", Description: "echo",
 		Parameters: map[string]any{"type": "object"},
-		Run: func(_ context.Context, _ tools.Env, raw string) (string, error) {
-			return "ok: " + raw, nil
+		Run: func(_ context.Context, _ tools.Env, raw string) (tools.Result, error) {
+			return tools.Result{Text: "ok: " + raw}, nil
 		},
 	})
 	fake := llm.NewFake(steps...)

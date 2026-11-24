@@ -39,11 +39,11 @@ func newTestRegistry() *tools.Registry {
 		Name:        "echo",
 		Description: "echo the arguments",
 		Parameters:  map[string]any{"type": "object"},
-		Run: func(_ context.Context, _ tools.Env, raw string) (string, error) {
+		Run: func(_ context.Context, _ tools.Env, raw string) (tools.Result, error) {
 			if strings.Contains(raw, "boom") {
-				return "", errors.New("boom")
+				return tools.Result{}, errors.New("boom")
 			}
-			return "ok: " + raw, nil
+			return tools.Result{Text: "ok: " + raw}, nil
 		},
 	})
 	return r

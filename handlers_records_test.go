@@ -62,7 +62,7 @@ func TestRecordsTasksAPI(t *testing.T) {
 	day := assistant.LogicalDay(testNow, settings.Loc, settings.DayStartsAt)
 
 	// Created through the same validation the tools use.
-	task, err := tools.CreateTask(ctx, db, "write the tests", "", "", "", day, nil)
+	task, err := tools.CreateTask(ctx, db, "write the tests", "", "", "", day, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestRecordsActivitiesAndRemindersAPI(t *testing.T) {
 	day := assistant.LogicalDay(testNow, settings.Loc, settings.DayStartsAt)
 
 	minutes := 90
-	act, err := tools.AddActivity(ctx, db, "api refactor", &minutes, "", "", day, nil)
+	act, err := tools.AddActivity(ctx, db, "api refactor", &minutes, "", "", day, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

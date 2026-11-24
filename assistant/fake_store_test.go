@@ -89,14 +89,26 @@ func (f *fakeStore) FinishRun(_ context.Context, id int64, status, errMsg string
 	return nil
 }
 
-func (f *fakeStore) AddToolCall(_ context.Context, tc store.ToolCall) (store.ToolCall, error) {
+func (f *fakeStore) StartToolCall(_ context.Context, tc store.ToolCall) (store.ToolCall, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.nextCall++
 	tc.ID = f.nextCall
 	tc.CreatedAt = time.Now()
+	tc.Status = "running"
 	f.calls = append(f.calls, tc)
 	return tc, nil
+}
+
+func (f *fakeStore) FinishToolCall(_ context.Context, id int64, result string, undo []byte, status string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.calls {
+		if f.calls[i].ID == id {
+			f.calls[i].Result, f.calls[i].Undo, f.calls[i].Status = result, undo, status
+		}
+	}
+	return nil
 }
 
 func (f *fakeStore) messages() []store.Message {

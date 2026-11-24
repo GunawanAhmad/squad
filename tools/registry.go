@@ -13,22 +13,37 @@ import (
 	"time"
 
 	"characters/llm"
+	"characters/store"
 )
 
 // Env is what a tool may know about the turn it runs in.
 type Env struct {
-	CharacterID    string
-	ConversationID string
-	Allowed        []string // the character's tool allowlist
-	Now            time.Time
+	CharacterID     string
+	ConversationID  string
+	Allowed         []string // the character's tool allowlist
+	Now             time.Time
+	DB              *store.Store   // domain tools only; nil in web-tool tests
+	Day             time.Time      // logical day (04:00 boundary)
+	Loc             *time.Location // settings.tz
+	ToolCallID      int64          // this call's tool_calls row, stamped on records
+	SourceMessageID *int64         // the user message that triggered the turn
 }
+
+// Result is what a tool returns: text for the model and, for write tools, the
+// inverse operations the undo path applies.
+type Result struct {
+	Text string
+	Undo []UndoOp
+}
+
+func text(s string) Result { return Result{Text: s} }
 
 // Tool is one callable tool. Parameters is a JSON schema object.
 type Tool struct {
 	Name        string
 	Description string
 	Parameters  map[string]any
-	Run         func(ctx context.Context, env Env, raw string) (string, error)
+	Run         func(ctx context.Context, env Env, raw string) (Result, error)
 }
 
 // Registry is the set of all known tools.
@@ -38,7 +53,10 @@ type Registry struct {
 
 func New() *Registry {
 	r := &Registry{tools: map[string]*Tool{}}
-	for _, t := range []*Tool{webSearchTool(), fetchURLTool()} {
+	for _, t := range []*Tool{
+		webSearchTool(), fetchURLTool(),
+		planTasksTool(), updateTaskTool(), completeTaskTool(), listTasksTool(),
+	} {
 		r.tools[t.Name] = t
 	}
 	return r
@@ -73,13 +91,13 @@ func (r *Registry) Specs(allowed []string) []llm.ToolSpec {
 
 // Run dispatches one call. It never panics on bad model output; the caller
 // turns the error into text for the model so it can recover.
-func (r *Registry) Run(ctx context.Context, env Env, name, raw string) (string, error) {
+func (r *Registry) Run(ctx context.Context, env Env, name, raw string) (Result, error) {
 	if !slices.Contains(env.Allowed, name) {
-		return "", fmt.Errorf("tool not available: %s", name)
+		return Result{}, fmt.Errorf("tool not available: %s", name)
 	}
 	t, ok := r.tools[name]
 	if !ok {
-		return "", fmt.Errorf("unknown tool: %s", name)
+		return Result{}, fmt.Errorf("unknown tool: %s", name)
 	}
 	if strings.TrimSpace(raw) == "" {
 		raw = "{}"
@@ -96,17 +114,18 @@ func webSearchTool() *Tool {
 			"properties": map[string]any{"query": map[string]any{"type": "string"}},
 			"required":   []string{"query"},
 		},
-		Run: func(ctx context.Context, _ Env, raw string) (string, error) {
+		Run: func(ctx context.Context, _ Env, raw string) (Result, error) {
 			var args struct {
 				Query string `json:"query"`
 			}
 			if err := json.Unmarshal([]byte(raw), &args); err != nil {
-				return "", fmt.Errorf("bad arguments: %w", err)
+				return Result{}, fmt.Errorf("bad arguments: %w", err)
 			}
 			if strings.TrimSpace(args.Query) == "" {
-				return "", errors.New("query is required")
+				return Result{}, errors.New("query is required")
 			}
-			return webSearch(ctx, args.Query)
+			out, err := webSearch(ctx, args.Query)
+			return text(out), err
 		},
 	}
 }
@@ -120,17 +139,18 @@ func fetchURLTool() *Tool {
 			"properties": map[string]any{"url": map[string]any{"type": "string"}},
 			"required":   []string{"url"},
 		},
-		Run: func(ctx context.Context, _ Env, raw string) (string, error) {
+		Run: func(ctx context.Context, _ Env, raw string) (Result, error) {
 			var args struct {
 				URL string `json:"url"`
 			}
 			if err := json.Unmarshal([]byte(raw), &args); err != nil {
-				return "", fmt.Errorf("bad arguments: %w", err)
+				return Result{}, fmt.Errorf("bad arguments: %w", err)
 			}
 			if strings.TrimSpace(args.URL) == "" {
-				return "", errors.New("url is required")
+				return Result{}, errors.New("url is required")
 			}
-			return fetchURL(ctx, args.URL)
+			out, err := fetchURL(ctx, args.URL)
+			return text(out), err
 		},
 	}
 }
