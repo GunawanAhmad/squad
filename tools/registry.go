@@ -58,7 +58,7 @@ func New() *Registry {
 		planTasksTool(), updateTaskTool(), completeTaskTool(), listTasksTool(),
 		logActivityTool(), queryActivitiesTool(),
 		remindMeTool(), listRemindersTool(), cancelReminderTool(),
-		undoTool(),
+		skipCheckinTool(), undoTool(),
 	} {
 		r.tools[t.Name] = t
 	}

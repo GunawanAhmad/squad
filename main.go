@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"characters/assistant"
 	"characters/llm"
@@ -103,7 +104,24 @@ func main() {
 		BeforeTurn: func(ctx context.Context) { backup.Maybe(ctx, assistant.Now()) },
 	})
 
-	s := &server{chars: chars, list: list, db: db, runner: runner}
+	var engine *assistant.Engine
+	if c, ok := chars[assistantCharacterID]; ok {
+		provider, model, err := resolveModel(c, "")
+		if err != nil {
+			log.Fatal(err)
+		}
+		engine = &assistant.Engine{
+			Store: db, Runner: runner, Now: assistant.Now,
+			Char: assistant.Character{
+				ID: c.ID, Name: c.Name, Provider: provider, Model: model,
+				Persona: c.Persona, Tools: c.Tools, Daily: true,
+			},
+			Setting: func(ctx context.Context) assistant.Settings { return assistant.LoadSettings(ctx, db) },
+			Before:  func(ctx context.Context, now time.Time) { backup.Maybe(ctx, now) },
+		}
+	}
+
+	s := &server{chars: chars, list: list, db: db, records: db, runner: runner, engine: engine}
 	mux := http.NewServeMux()
 	s.routes(mux)
 

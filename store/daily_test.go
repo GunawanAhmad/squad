@@ -179,6 +179,50 @@ func TestReminders(t *testing.T) {
 	}
 }
 
+func TestFireReminder(t *testing.T) {
+	s := storetest.New(t)
+	ctx := context.Background()
+	at := time.Date(2026, 12, 1, 7, 0, 0, 0, time.UTC)
+	now := at.Add(time.Minute)
+
+	r, err := s.AddReminder(ctx, store.Reminder{Text: "stretch", RemindAt: at, Repeat: "daily"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := at.AddDate(0, 0, 1)
+	ok, err := s.FireReminder(ctx, r.ID, now, &next)
+	if err != nil || !ok {
+		t.Fatalf("fire: %v, %v", ok, err)
+	}
+	got, _ := s.GetReminder(ctx, r.ID)
+	if got.Status != "pending" || !got.RemindAt.Equal(next) || got.FiredAt == nil {
+		t.Fatalf("repeating reminder after firing: %+v", got)
+	}
+	// A second poll at the same time must not fire it again.
+	if ok, _ := s.FireReminder(ctx, r.ID, now, &next); ok {
+		t.Fatal("fired twice")
+	}
+
+	once, err := s.AddReminder(ctx, store.Reminder{Text: "call mom", RemindAt: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.FireReminder(ctx, once.ID, now, nil); err != nil || !ok {
+		t.Fatalf("fire once: %v, %v", ok, err)
+	}
+	if got, _ := s.GetReminder(ctx, once.ID); got.Status != "fired" || got.FiredAt == nil {
+		t.Fatalf("one-off after firing: %+v", got)
+	}
+	// A reminder that is not due yet is not claimed.
+	later, err := s.AddReminder(ctx, store.Reminder{Text: "later", RemindAt: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := s.FireReminder(ctx, later.ID, now, nil); ok {
+		t.Fatal("fired a future reminder")
+	}
+}
+
 func TestCheckinsAndSettings(t *testing.T) {
 	s := storetest.New(t)
 	ctx := context.Background()

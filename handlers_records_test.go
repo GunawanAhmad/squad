@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"characters/assistant"
+	"characters/llm"
 	"characters/store"
 	"characters/store/storetest"
 	"characters/tools"
@@ -262,4 +263,47 @@ func TestAssistantDailyThread(t *testing.T) {
 	// A persona still gets a fresh thread per "New chat".
 	persona := decode[map[string]any](t, do(t, mux, "POST", "/api/conversations", map[string]any{"characterId": "assistant"}))
 	_ = persona
+}
+
+func TestDueEndpoint(t *testing.T) {
+	db := storetest.New(t)
+	fake := llm.NewFake(llm.FakeStep{Text: "Morning!"})
+	runner := assistant.New(assistant.Config{
+		Store: db, DB: db,
+		Models: map[string]llm.Model{
+			string(llm.OpenCodeProvider): fake, string(llm.ClaudeProvider): fake,
+		},
+		Now: func() time.Time { return testNow }, Location: assistant.TimeZone(),
+	})
+	engine := &assistant.Engine{
+		Store: db, Runner: runner, Now: func() time.Time { return testNow },
+		Char: assistant.Character{ID: "assistant", Provider: "opencode", Model: "fake", Daily: true},
+	}
+	s := &server{
+		chars: map[string]Character{"assistant": {ID: "assistant"}},
+		db:    db, records: db, engine: engine, now: func() time.Time { return testNow },
+	}
+	mux := http.NewServeMux()
+	s.routes(mux)
+
+	// 09:00 on 1 December: the morning check-in is due, and a reminder that
+	// came due is written into today's thread immediately.
+	if _, err := db.AddReminder(context.Background(), store.Reminder{
+		Text: "call mom", RemindAt: time.Date(2026, 12, 1, 8, 57, 0, 0, assistant.TimeZone()),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	due := decode[map[string]any](t, do(t, mux, "GET", "/api/assistant/due", nil))
+	if due["day"] != "2026-12-01" || due["conversationId"] != "daily:2026-12-01" || due["checkin"] != "morning" {
+		t.Fatalf("due: %+v", due)
+	}
+	reminders := due["reminders"].([]any)
+	if len(reminders) != 1 {
+		t.Fatalf("reminders: %+v", reminders)
+	}
+	msgs, err := db.Messages(context.Background(), "daily:2026-12-01", 0, 0)
+	if err != nil || len(msgs) != 1 || msgs[0].Content != "⏰ call mom" {
+		t.Fatalf("reminder message: %+v, %v", msgs, err)
+	}
 }

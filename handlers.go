@@ -36,7 +36,8 @@ type server struct {
 	db      apiStore
 	records *store.Store // nullable in conversation-only tests
 	runner  *assistant.Runner
-	now     func() time.Time // injectable clock for tests
+	engine  *assistant.Engine // check-in engine; nil without an assistant character
+	now     func() time.Time  // injectable clock for tests
 }
 
 // settings is settings.tz and the day boundary; records is nil in tests.
@@ -84,6 +85,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/assistant/settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /api/assistant/settings", s.handlePutSettings)
 	mux.HandleFunc("POST /api/assistant/undo", s.handleUndo)
+	mux.HandleFunc("GET /api/assistant/due", s.handleDue)
 }
 
 func (s *server) handleCharacters(w http.ResponseWriter, _ *http.Request) {

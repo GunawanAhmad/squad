@@ -364,6 +364,23 @@ func (s *Store) UpdateReminder(ctx context.Context, r Reminder) (Reminder, error
 	return scanReminder(row)
 }
 
+// FireReminder atomically moves a pending reminder on: next is its next firing
+// time for a repeating reminder, nil for a one-off (which becomes fired). It
+// reports false when another poll already fired it.
+func (s *Store) FireReminder(ctx context.Context, id int64, now time.Time, next *time.Time) (bool, error) {
+	status := "fired"
+	if next != nil {
+		status = "pending"
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE reminders SET status = $3, remind_at = COALESCE($2, remind_at), fired_at = $4
+		WHERE id = $1 AND status = 'pending' AND remind_at <= $4`, id, next, status, now)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 func (s *Store) DeleteReminder(ctx context.Context, id int64) error {
 	return s.deleteOne(ctx, "reminders", id)
 }
@@ -458,11 +475,13 @@ func (s *Store) FailCheckin(ctx context.Context, day time.Time, kind string) (in
 	return attempts, err
 }
 
-// SkipCheckin writes a skipped row ahead of time; an existing row wins.
+// SkipCheckin writes a skipped row, also downgrading a pending or failed row
+// from an earlier poll. A sent check-in is never rewritten.
 func (s *Store) SkipCheckin(ctx context.Context, day time.Time, kind string) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO checkins (day, kind, status) VALUES ($1, $2, 'skipped')
-		ON CONFLICT (day, kind) DO NOTHING`, Day(day), kind)
+		ON CONFLICT (day, kind) DO UPDATE SET status = 'skipped', updated_at = now()
+		WHERE checkins.status <> 'sent'`, Day(day), kind)
 	return err
 }
 
