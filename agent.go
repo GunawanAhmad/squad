@@ -14,14 +14,6 @@ import (
 
 const maxSteps = 10
 
-type event struct {
-	Type    string `json:"type"` // text | tool | error
-	Delta   string `json:"delta,omitempty"`
-	Name    string `json:"name,omitempty"`
-	Args    string `json:"args,omitempty"`
-	Message string `json:"message,omitempty"`
-}
-
 // Created lazily so .env is loaded first.
 var openCodeModel = sync.OnceValue(func() llm.Model {
 	return llm.NewOpenCode(
@@ -46,7 +38,7 @@ func loadSystemPrompt(c Character) string {
 
 // runChat is the old /api/chat loop. F-7 moves it to assistant.Turn and F-9
 // deletes this path; until then it keeps characters working on the new adapters.
-func runChat(ctx context.Context, c Character, sessionID string, history []chatMsg, send func(event)) error {
+func runChat(ctx context.Context, c Character, sessionID string, history []chatMsg, send func(assistant.Event)) error {
 	msgs := make([]llm.Message, 0, len(history))
 	for _, m := range history {
 		msgs = append(msgs, llm.Message{Role: m.Role, Content: m.Content})
@@ -58,7 +50,7 @@ func runChat(ctx context.Context, c Character, sessionID string, history []chatM
 		resp, err := openCodeModel().Stream(ctx, llm.Request{
 			Model: c.Model, System: system, Messages: msgs, Tools: specs, Session: sessionID,
 		}, func(text string) {
-			send(event{Type: "text", Delta: text})
+			send(assistant.Event{Type: "text", Delta: text})
 		})
 		if err != nil {
 			return err
@@ -71,7 +63,7 @@ func runChat(ctx context.Context, c Character, sessionID string, history []chatM
 			Role: "assistant", Content: resp.Text, ToolCalls: resp.ToolCalls, Reasoning: resp.Reasoning,
 		})
 		for _, tc := range resp.ToolCalls {
-			send(event{Type: "tool", Name: tc.Name, Args: tc.Arguments})
+			send(assistant.Event{Type: "tool", Name: tc.Name, Args: tc.Arguments})
 			out, err := toolRegistry.Run(ctx, tools.Env{
 				CharacterID: c.ID, ConversationID: sessionID, Allowed: c.Tools, Now: time.Now(),
 			}, tc.Name, tc.Arguments)
@@ -81,11 +73,11 @@ func runChat(ctx context.Context, c Character, sessionID string, history []chatM
 			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: out})
 		}
 	}
-	send(event{Type: "text", Delta: "\n\n(stopped: too many tool steps)"})
+	send(assistant.Event{Type: "text", Delta: "\n\n(stopped: too many tool steps)"})
 	return nil
 }
 
-func runClaude(ctx context.Context, c Character, _ string, history []chatMsg, send func(event)) error {
+func runClaude(ctx context.Context, c Character, _ string, history []chatMsg, send func(assistant.Event)) error {
 	msgs := make([]llm.Message, 0, len(history))
 	for _, m := range history {
 		msgs = append(msgs, llm.Message{Role: m.Role, Content: m.Content})
@@ -94,7 +86,7 @@ func runClaude(ctx context.Context, c Character, _ string, history []chatMsg, se
 	_, err := claudeModel().Stream(ctx, llm.Request{
 		Model: c.Model, System: loadSystemPrompt(c), Messages: msgs,
 	}, func(text string) {
-		send(event{Type: "text", Delta: text})
+		send(assistant.Event{Type: "text", Delta: text})
 	})
 	return err
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"embed"
 	"encoding/json"
 	"io/fs"
@@ -12,6 +13,9 @@ import (
 	"slices"
 	"strings"
 
+	"characters/assistant"
+	"characters/llm"
+	"characters/store"
 	"characters/tools"
 )
 
@@ -51,6 +55,10 @@ func main() {
 	if os.Getenv("OPENCODE_API_KEY") == "" {
 		log.Fatal("OPENCODE_API_KEY is not set (see .env.example)")
 	}
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		log.Fatal("DATABASE_URL is not set (see .env.example)")
+	}
 
 	raw, err := os.ReadFile("characters.json")
 	if err != nil {
@@ -73,82 +81,37 @@ func main() {
 		chars[c.ID] = c
 	}
 
+	db, err := store.Open(context.Background(), dsn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	runner := assistant.New(assistant.Config{
+		Store: db,
+		Tools: toolRegistry,
+		Models: map[string]llm.Model{
+			string(llm.OpenCodeProvider): openCodeModel(),
+			string(llm.ClaudeProvider):   claudeModel(),
+		},
+		Memory:   func(charID string) string { return memoryPrompt(Character{ID: charID}) },
+		Now:      assistant.Now,
+		Location: assistant.TimeZone(),
+	})
+
+	s := &server{chars: chars, list: list, db: db, runner: runner}
+	mux := http.NewServeMux()
+	s.routes(mux)
+
 	web, _ := fs.Sub(webFS, "web")
 	if os.Getenv("DEV") != "" {
 		web = os.DirFS("web") // serve web/ from disk, so `make web` shows up without restarting
 	}
-	http.Handle("GET /", http.FileServerFS(web))
-
-	http.HandleFunc("GET /api/characters", func(w http.ResponseWriter, r *http.Request) {
-		public := make([]map[string]any, 0, len(list))
-		for _, c := range list {
-			public = append(public, map[string]any{"id": c.ID, "name": c.Name, "ui": c.UI, "model": choice(c.Provider, c.Model), "models": c.Models})
-		}
-		w.Header().Set("Content-Type", "application/json")
-		err := json.NewEncoder(w).Encode(public)
-		if err != nil {
-			return
-		}
-	})
-
-	http.HandleFunc("POST /api/chat", func(w http.ResponseWriter, r *http.Request) {
-		var req chatRequest
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&req); err != nil {
-			http.Error(w, "bad json", http.StatusBadRequest)
-			return
-		}
-		c, ok := chars[req.CharacterID]
-		if !ok {
-			http.Error(w, "unknown character", http.StatusBadRequest)
-			return
-		}
-		if msg := validate(req); msg != "" {
-			http.Error(w, msg, http.StatusBadRequest)
-			return
-		}
-		if req.Model != "" && req.Model != choice(c.Provider, c.Model) {
-			if !slices.Contains(c.Models, req.Model) { // allowlist: the model string reaches the API and the claude CLI
-				http.Error(w, "unknown model", http.StatusBadRequest)
-				return
-			}
-			c.Provider, c.Model = "", req.Model
-			if m, ok := strings.CutPrefix(req.Model, "claude/"); ok {
-				c.Provider, c.Model = "claude", m
-			}
-		}
-
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("X-Accel-Buffering", "no")
-		rc := http.NewResponseController(w)
-		enc := json.NewEncoder(w)
-		send := func(e event) {
-			err := enc.Encode(e)
-			if err != nil {
-				return
-			}
-
-			err = rc.Flush()
-			if err != nil {
-				return
-			}
-		}
-		if c.Provider == "claude" {
-			if err := runClaude(r.Context(), c, req.SessionID, req.Messages, send); err != nil && r.Context().Err() == nil {
-				log.Printf("chat %s: %v", c.ID, err)
-				send(event{Type: "error", Message: err.Error()})
-			}
-		} else {
-			if err := runChat(r.Context(), c, req.SessionID, req.Messages, send); err != nil && r.Context().Err() == nil {
-				log.Printf("chat %s: %v", c.ID, err)
-				send(event{Type: "error", Message: err.Error()})
-			}
-		}
-	})
+	mux.Handle("GET /", http.FileServerFS(web))
 
 	addr := envOr("ADDR", "127.0.0.1:8080") // localhost only: there is no auth, anyone who can reach it spends your quota
 	log.Printf("listening on http://%s", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	log.Fatal(http.ListenAndServe(addr, mux))
 }
 
 func validate(req chatRequest) string {
