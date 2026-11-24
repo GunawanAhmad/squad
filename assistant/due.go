@@ -251,7 +251,7 @@ func (e *Engine) Execute(ctx context.Context, plan Plan) CheckinResult {
 	res, err := e.Runner.Turn(ctx, TurnRequest{
 		ConversationID: plan.ConversationID,
 		Character:      e.Char,
-		Input:          triggerInstruction(kind),
+		Input:          TriggerInstruction(kind),
 		Role:           "trigger",
 		Kind:           "checkin",
 	}, nil)
@@ -296,10 +296,10 @@ func (e *Engine) release() {
 	e.busy = false
 }
 
-// triggerInstruction is stored as a trigger message: it is what the model is
-// asked to do, never shown in the UI. Both instructions only allow questions
+// TriggerInstruction is stored as a trigger message: it is what the model is
+// asked to do, never shown in the UI. The eval uses the same text. Both instructions only allow questions
 // and reflecting back (D6); advice happens only when the user asks.
-func triggerInstruction(kind string) string {
+func TriggerInstruction(kind string) string {
 	switch kind {
 	case CheckinEvening:
 		return strings.TrimSpace(`Evening check-in. Today's plans and what was logged are in <today>.

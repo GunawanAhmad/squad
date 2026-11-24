@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,37 +34,56 @@ func New(t testing.TB) *store.Store {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	s, cleanup, err := NewSchema(ctx, dsn)
+	if err != nil {
+		if errors.Is(err, ErrUnreachable) {
+			t.Skipf("store tests need Postgres: %v; run `make search`", err)
+		}
+		t.Fatalf("store test schema: %v", err)
+	}
+	t.Cleanup(cleanup)
+	t.Cleanup(s.Close)
+	return s
+}
+
+// ErrUnreachable means Postgres is not running; callers may skip instead of fail.
+var ErrUnreachable = errors.New("postgres unreachable")
+
+// NewSchema is New without a testing.TB, for the eval harness. The caller must
+// run the returned cleanup (it drops the schema).
+func NewSchema(ctx context.Context, dsn string) (*store.Store, func(), error) {
 	admin, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		t.Skipf("store tests need Postgres: DATABASE_URL is unusable (%v); run `make search`", err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 	if err := admin.Ping(ctx); err != nil {
 		admin.Close()
-		t.Skipf("store tests need Postgres: cannot connect (%v); run `make search`", err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 
 	schema := schemaName()
 	// The name is generated here (not user input), so it is safe to interpolate.
 	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
 		admin.Close()
-		t.Fatalf("create test schema %s: %v", schema, err)
+		return nil, nil, fmt.Errorf("create schema %s: %w", schema, err)
 	}
-	t.Cleanup(func() {
+	cleanup := func() {
 		c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if _, err := admin.Exec(c, "DROP SCHEMA "+schema+" CASCADE"); err != nil {
-			t.Logf("drop test schema %s: %v", schema, err)
-		}
+		_, _ = admin.Exec(c, "DROP SCHEMA "+schema+" CASCADE")
 		admin.Close()
-	})
+	}
 
 	s, err := store.Open(ctx, withSearchPath(dsn, schema))
 	if err != nil {
-		t.Fatalf("open store on schema %s: %v", schema, err)
+		cleanup()
+		return nil, nil, fmt.Errorf("open store on schema %s: %w", schema, err)
 	}
-	t.Cleanup(s.Close)
-	return s
+	return s, cleanup, nil
 }
+
+// DSN returns DATABASE_URL from the environment or the nearest .env.
+func DSN() (string, bool) { return databaseURL() }
 
 func schemaName() string {
 	var b [6]byte

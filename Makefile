@@ -31,6 +31,12 @@ test: web lint
 	go vet $(GO_PKGS)
 	go test $(GO_PKGS) # not ./...: frontend/node_modules contains stray Go packages
 
+# Model evals (docs/assistant-roadmap.md §7). Spends real API credit:
+#   make eval models=deepseek-v4.1-flash,claude-haiku-5-5 runs=3
+# `go run ./eval -dry-run -models=...` prints the call estimate first.
+eval:
+	go run ./eval $(if $(models),-models=$(models),) $(if $(judge),-judge=$(judge),) $(if $(runs),-runs=$(runs),) $(if $(sets),-sets=$(sets),)
+
 search:
 	docker compose up -d --wait
 

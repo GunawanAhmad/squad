@@ -70,11 +70,23 @@ func ParseDay(raw string, base time.Time) (time.Time, error) {
 	case "yesterday":
 		return base.AddDate(0, 0, -1), nil
 	}
+	if wd, ok := weekdayNames[s]; ok {
+		for d := base.AddDate(0, 0, 1); ; d = d.AddDate(0, 0, 1) {
+			if d.Weekday() == wd {
+				return d, nil
+			}
+		}
+	}
 	t, err := time.Parse("2006-01-02", s)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("%w: %q is not a date (use YYYY-MM-DD, today, tomorrow)", ErrInvalid, raw)
+		return time.Time{}, fmt.Errorf("%w: %q is not a date (use YYYY-MM-DD, today, tomorrow, or a weekday)", ErrInvalid, raw)
 	}
 	return store.Day(t), nil
+}
+
+var weekdayNames = map[string]time.Weekday{
+	"monday": time.Monday, "tuesday": time.Tuesday, "wednesday": time.Wednesday,
+	"thursday": time.Thursday, "friday": time.Friday, "saturday": time.Saturday, "sunday": time.Sunday,
 }
 
 // ParseReminderAt turns "15:00", "tomorrow 09:00", "in 20m" or an RFC3339
