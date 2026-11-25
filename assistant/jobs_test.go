@@ -450,3 +450,41 @@ func TestCloseDayRetriesOneOwnerAlone(t *testing.T) {
 		t.Fatalf("extra model calls: %d", fake.Remaining())
 	}
 }
+
+// A character whose context is "none" has no memory stack, so the day-close job
+// must not extract facts for it either.
+func TestCloseSkipsCharactersWithMemoryOff(t *testing.T) {
+	now := local(9, 0)
+	e, st, fake := newTestEngine(t, now,
+		llm.FakeStep{Text: `{"facts":[{"op":"ADD","text":"assistant closes","category":"work"}]}`},
+	)
+	e.MemoryEnabled = func(characterID string) bool { return characterID == "assistant" }
+	ctx := context.Background()
+	today := LogicalDay(now, testLoc, 4*time.Hour)
+	yesterday := today.AddDate(0, 0, -1)
+	markClosed(t, e, today, 2, 7)
+	seedDayThread(t, st, "assistant", yesterday, "I finished the report.")
+	seedDayThread(t, st, "mute", yesterday, "This must not become a fact.")
+
+	plan, err := e.Decide(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Close) != 1 || plan.Close[0].CharacterID != "assistant" {
+		t.Fatalf("close plan: %+v", plan.Close)
+	}
+	e.ExecuteJobs(ctx, plan)
+
+	if facts, _ := st.Facts(ctx, "assistant", store.FactFilter{Status: []string{"active"}}); len(facts) != 1 {
+		t.Fatalf("assistant facts: %+v", facts)
+	}
+	if facts, _ := st.Facts(ctx, "mute", store.FactFilter{Status: []string{"active"}}); len(facts) != 0 {
+		t.Fatalf("memory-off character got facts: %+v", facts)
+	}
+	if _, err := st.Checkin(ctx, yesterday, "close", "mute"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("memory-off character was claimed: %v", err)
+	}
+	if fake.Remaining() != 0 {
+		t.Fatalf("extra model calls: %d", fake.Remaining())
+	}
+}

@@ -130,7 +130,7 @@ func main() {
 			log.Fatal(err)
 		}
 		engine = &assistant.Engine{
-			Store: db, Runner: runner, Now: assistant.Now,
+			Store: db, Runner: runner, Now: assistant.Now, MemoryEnabled: memoryEnabled(chars),
 			Char: assistant.Character{
 				ID: c.ID, Name: c.Name, Provider: provider, Model: model,
 				Persona: c.Persona, Tools: c.Tools, Context: c.Context, Daily: true,
@@ -153,6 +153,16 @@ func main() {
 	addr := envOr("ADDR", "127.0.0.1:8080") // localhost only: there is no auth, anyone who can reach it spends your quota
 	log.Printf("listening on http://%s", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
+}
+
+// memoryEnabled reports which characters have their memory stack on. A
+// character set to context "none" is skipped by the day-close job too; an
+// unknown id (removed from characters.json) is not given new facts.
+func memoryEnabled(chars map[string]Character) func(string) bool {
+	return func(charID string) bool {
+		c, ok := chars[charID]
+		return ok && c.Context != "none"
+	}
 }
 
 // characterMemory is the always-in-prompt block for one agent: the shared

@@ -42,6 +42,11 @@ type Engine struct {
 	Before func(ctx context.Context, now time.Time)
 	// Window is the raw message window the summary keeps; 0 means DefaultWindow.
 	Window int
+	// MemoryEnabled reports whether a character has its memory stack. A
+	// character with context "none" is not closed: the day-close job must not
+	// learn facts for an agent whose memory is off. Nil means every character
+	// with messages is closed.
+	MemoryEnabled func(characterID string) bool
 
 	mu   sync.Mutex
 	busy bool

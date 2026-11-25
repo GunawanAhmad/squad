@@ -106,3 +106,16 @@ func TestAssistantPersonaFitsBudget(t *testing.T) {
 		t.Fatalf("assistant persona is truncated (%d chars); raise budgetPersona or shorten it", len(a.Persona))
 	}
 }
+
+func TestMemoryEnabledFollowsContext(t *testing.T) {
+	enabled := memoryEnabled(map[string]Character{
+		"assistant": {ID: "assistant", Context: "memory"},
+		"ria":       {ID: "ria"}, // empty means the default, memory
+		"mute":      {ID: "mute", Context: "none"},
+	})
+	for id, want := range map[string]bool{"assistant": true, "ria": true, "mute": false, "removed": false} {
+		if got := enabled(id); got != want {
+			t.Fatalf("memoryEnabled(%q) = %v, want %v", id, got, want)
+		}
+	}
+}

@@ -75,6 +75,11 @@ func (e *Engine) closeJobs(ctx context.Context, today time.Time, set Settings) (
 			if len(jobs) >= closePerPass {
 				break
 			}
+			// "context: none" means nothing, including extraction: an agent
+			// whose memory is off must not have its day mined into facts.
+			if e.MemoryEnabled != nil && !e.MemoryEnabled(characterID) {
+				continue
+			}
 			c, err := e.Store.Checkin(ctx, day, "close", characterID)
 			switch {
 			case err == nil:
