@@ -554,7 +554,7 @@ The grounding check is deterministic: the model must call `get_overview` or `get
 
 Limits of this check, recorded so the number is not over-read: it allows numbers from seeded records, so a wrong total that equals another seeded value could pass (the summary cases' pinned totals catch the important ones); a prose focus answer with no list markers only needs one citation, not one per sentence; and it does not exercise D3's "never from web" rule because the grounding spec does not offer the web tools. Those remain persona rules rather than measured behavior.
 
-The tool failures include two runs of "I dropped the newsletter idea" with no tool call, and three Indonesian "laporan" references. The tool cases seed English task titles, so no task named "laporan" exists; the model resolved to "finish the report" (`#2`), which the matcher does not accept. That is an eval-seed artifact, not a tool bug; the measured 91.5% still clears the 90% gate.
+The visible tool failures include one run of "I dropped the newsletter idea" with no tool call, and four Indonesian "laporan" references (three "tugas bikin laporan" and one "geser bikin laporan"). The tool cases seed English task titles, so no task named "laporan" exists; the model resolved to "finish the report" (`#2`), which the matcher does not accept. That is an eval-seed artifact, not a tool bug; the measured 91.5% still clears the 90% gate.
 
 The assistant persona is now 3,686 characters. Its section budget was raised from 3,000 to 4,000 during this phase: the old cap silently truncated the D3 web rules, which the Phase 3 additions pushed past the limit. A test now fails if the assistant persona no longer fits.
 
