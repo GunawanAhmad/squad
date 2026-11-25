@@ -6,6 +6,7 @@
 
 CREATE TABLE facts (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  character_id text NOT NULL,                -- the agent that was told; facts never cross agents
   text text NOT NULL CHECK (length(text) <= 300),
   category text NOT NULL DEFAULT 'general',  -- preference | person | circumstance | goal | work | health | general
   core boolean NOT NULL DEFAULT false,       -- always in context
@@ -22,4 +23,4 @@ CREATE TABLE facts (
   search tsvector GENERATED ALWAYS AS (to_tsvector('simple', text)) STORED
 );
 CREATE INDEX facts_search ON facts USING gin (search);
-CREATE INDEX facts_active ON facts (status, core);
+CREATE INDEX facts_active ON facts (character_id, status, core);

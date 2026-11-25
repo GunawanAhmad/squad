@@ -228,23 +228,23 @@ func TestCheckinsAndSettings(t *testing.T) {
 	ctx := context.Background()
 	d := day(2026, 12, 1)
 
-	ok, err := s.ClaimCheckin(ctx, d, "morning")
+	ok, err := s.ClaimCheckin(ctx, d, "morning", testOwner)
 	if err != nil || !ok {
 		t.Fatalf("first claim: %v, %v", ok, err)
 	}
-	ok, err = s.ClaimCheckin(ctx, d, "morning")
+	ok, err = s.ClaimCheckin(ctx, d, "morning", testOwner)
 	if err != nil || ok {
 		t.Fatalf("second claim must lose the race: %v, %v", ok, err)
 	}
-	c, err := s.Checkin(ctx, d, "morning")
+	c, err := s.Checkin(ctx, d, "morning", testOwner)
 	if err != nil || c.Status != "pending" || c.Attempts != 0 {
 		t.Fatalf("claimed check-in: %+v, %v", c, err)
 	}
 
-	if n, err := s.FailCheckin(ctx, d, "morning"); err != nil || n != 1 {
+	if n, err := s.FailCheckin(ctx, d, "morning", testOwner); err != nil || n != 1 {
 		t.Fatalf("fail: %d, %v", n, err)
 	}
-	if n, err := s.FailCheckin(ctx, d, "morning"); err != nil || n != 2 {
+	if n, err := s.FailCheckin(ctx, d, "morning", testOwner); err != nil || n != 2 {
 		t.Fatalf("fail again: %d, %v", n, err)
 	}
 	if _, err := s.CreateConversation(ctx, store.Conversation{ID: "c", CharacterID: "assistant"}); err != nil {
@@ -259,25 +259,25 @@ func TestCheckinsAndSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishCheckin(ctx, d, "morning", "sent", &msg.ID, &runID); err != nil {
+	if err := s.FinishCheckin(ctx, d, "morning", testOwner, "sent", &msg.ID, &runID); err != nil {
 		t.Fatal(err)
 	}
-	c, err = s.Checkin(ctx, d, "morning")
+	c, err = s.Checkin(ctx, d, "morning", testOwner)
 	if err != nil || c.Status != "sent" || c.Attempts != 2 || *c.MessageID != msg.ID || *c.RunID != runID {
 		t.Fatalf("sent check-in: %+v, %v", c, err)
 	}
 
-	if err := s.SkipCheckin(ctx, d, "evening"); err != nil {
+	if err := s.SkipCheckin(ctx, d, "evening", testOwner); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SkipCheckin(ctx, d, "evening"); err != nil { // idempotent
+	if err := s.SkipCheckin(ctx, d, "evening", testOwner); err != nil { // idempotent
 		t.Fatal(err)
 	}
-	c, err = s.Checkin(ctx, d, "evening")
+	c, err = s.Checkin(ctx, d, "evening", testOwner)
 	if err != nil || c.Status != "skipped" {
 		t.Fatalf("skipped check-in: %+v, %v", c, err)
 	}
-	if _, err := s.Checkin(ctx, d, "close"); err != store.ErrNotFound {
+	if _, err := s.Checkin(ctx, d, "close", testOwner); err != store.ErrNotFound {
 		t.Fatalf("missing check-in: %v", err)
 	}
 

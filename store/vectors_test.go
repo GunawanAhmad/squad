@@ -38,19 +38,19 @@ func TestEmbeddingColumnsAndHybridSearch(t *testing.T) {
 	}
 
 	// Keyword-only cannot match "burned out", so it returns nothing.
-	kw, err := s.SearchMessages(ctx, store.MessageQuery{Text: "burned out"})
+	kw, err := s.SearchMessages(ctx, store.MessageQuery{CharacterID: testOwner, Text: "burned out"})
 	if err != nil || len(kw) != 0 {
 		t.Fatalf("keyword: %+v, %v", kw, err)
 	}
 	// Hybrid puts the vector match first.
-	hybrid, err := s.SearchMessages(ctx, store.MessageQuery{
+	hybrid, err := s.SearchMessages(ctx, store.MessageQuery{CharacterID: testOwner,
 		Text: "burned out", Vector: unit(0), EmbeddingModel: "fake", Limit: 5,
 	})
 	if err != nil || len(hybrid) == 0 || hybrid[0].ID != idMessage.ID {
 		t.Fatalf("hybrid should rank the vector match first: %+v, %v", hybrid, err)
 	}
 	// A vector from another model is never compared.
-	other, err := s.SearchMessages(ctx, store.MessageQuery{
+	other, err := s.SearchMessages(ctx, store.MessageQuery{CharacterID: testOwner,
 		Text: "burned out", Vector: unit(0), EmbeddingModel: "other", Limit: 5,
 	})
 	if err != nil || len(other) != 0 {
@@ -69,7 +69,7 @@ func TestEmbeddingColumnsAndHybridSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ForgetMessage(ctx, forgotten.ID); err != nil {
+	if err := s.ForgetMessage(ctx, testOwner, forgotten.ID); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := s.UnembeddedMessages(ctx, 10)
@@ -77,7 +77,7 @@ func TestEmbeddingColumnsAndHybridSearch(t *testing.T) {
 		t.Fatalf("pending after embedding: %+v, %v", pending, err)
 	}
 
-	fact, err := s.AddFact(ctx, store.Fact{Text: "allergic to peanuts", Category: "health", ValidFrom: day(2026, 1, 1)})
+	fact, err := s.AddFact(ctx, store.Fact{CharacterID: testOwner, Text: "allergic to peanuts", Category: "health", ValidFrom: day(2026, 1, 1)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestEmbeddingColumnsAndHybridSearch(t *testing.T) {
 		t.Fatalf("counts: %d, %d, %v", m, f, err)
 	}
 	// Facts are hybrid too: a wordless query finds peanuts by meaning.
-	facts, err := s.SearchFacts(ctx, store.FactQuery{Text: "nut allergy", Vector: unit(2), EmbeddingModel: "fake", Limit: 3})
+	facts, err := s.SearchFacts(ctx, store.FactQuery{CharacterID: testOwner, Text: "nut allergy", Vector: unit(2), EmbeddingModel: "fake", Limit: 3})
 	if err != nil || len(facts) != 1 || facts[0].ID != fact.ID {
 		t.Fatalf("fact hybrid: %+v, %v", facts, err)
 	}

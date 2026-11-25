@@ -10,61 +10,64 @@ import (
 	"characters/store/storetest"
 )
 
+// testOwner is the character every fact in these tests belongs to.
+const testOwner = "assistant"
+
 func TestFactsLifecycle(t *testing.T) {
 	s := storetest.New(t)
 	ctx := context.Background()
 
 	bali := day(2024, 3, 1)
-	f, err := s.AddFact(ctx, store.Fact{Text: "lives in Bali", Category: "circumstance", Core: true, ValidFrom: bali})
+	f, err := s.AddFact(ctx, store.Fact{CharacterID: testOwner, Text: "lives in Bali", Category: "circumstance", Core: true, ValidFrom: bali})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if f.Status != "active" || f.SourceKind != "user" || !store.Day(f.ValidFrom).Equal(bali) || f.ValidTo != nil {
 		t.Fatalf("added fact: %+v", f)
 	}
-	if _, err := s.AddFact(ctx, store.Fact{Text: strings.Repeat("x", 301)}); err == nil {
+	if _, err := s.AddFact(ctx, store.Fact{CharacterID: testOwner, Text: strings.Repeat("x", 301)}); err == nil {
 		t.Fatal("text over 300 characters must be rejected by the database")
 	}
 
 	// Superseding closes the old fact the day before the new one starts.
 	jakarta := day(2026, 12, 1)
-	moved, err := s.AddFact(ctx, store.Fact{Text: "lives in Jakarta", Category: "circumstance", Core: true, ValidFrom: jakarta})
+	moved, err := s.AddFact(ctx, store.Fact{CharacterID: testOwner, Text: "lives in Jakarta", Category: "circumstance", Core: true, ValidFrom: jakarta})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SupersedeOn(ctx, f.ID, moved.ID, jakarta); err != nil {
+	if err := s.SupersedeOn(ctx, testOwner, f.ID, moved.ID, jakarta); err != nil {
 		t.Fatal(err)
 	}
-	old, err := s.GetFact(ctx, f.ID)
+	old, err := s.GetFact(ctx, testOwner, f.ID)
 	if err != nil || old.Status != "superseded" || old.SupersededBy == nil || *old.SupersededBy != moved.ID {
 		t.Fatalf("superseded fact: %+v, %v", old, err)
 	}
 	if old.ValidTo == nil || !store.Day(*old.ValidTo).Equal(day(2026, 11, 30)) {
 		t.Fatalf("valid_to: %+v", old.ValidTo)
 	}
-	active, err := s.Facts(ctx, store.FactFilter{Status: []string{"active"}})
+	active, err := s.Facts(ctx, testOwner, store.FactFilter{Status: []string{"active"}})
 	if err != nil || len(active) != 1 || active[0].ID != moved.ID {
 		t.Fatalf("active facts: %+v, %v", active, err)
 	}
 	core := true
-	coreFacts, err := s.Facts(ctx, store.FactFilter{Status: []string{"active"}, Core: &core})
+	coreFacts, err := s.Facts(ctx, testOwner, store.FactFilter{Status: []string{"active"}, Core: &core})
 	if err != nil || len(coreFacts) != 1 {
 		t.Fatalf("core facts: %+v, %v", coreFacts, err)
 	}
 
 	// Forgetting keeps the row but removes it from search and context.
-	if err := s.ForgetFact(ctx, moved.ID, day(2026, 12, 2)); err != nil {
+	if err := s.ForgetFact(ctx, testOwner, moved.ID, day(2026, 12, 2)); err != nil {
 		t.Fatal(err)
 	}
-	if f, _ := s.GetFact(ctx, moved.ID); f.Status != "forgotten" {
+	if f, _ := s.GetFact(ctx, testOwner, moved.ID); f.Status != "forgotten" {
 		t.Fatalf("forgotten fact: %+v", f)
 	}
-	hits, err := s.SearchFacts(ctx, store.FactQuery{Text: "Jakarta"})
+	hits, err := s.SearchFacts(ctx, store.FactQuery{CharacterID: testOwner, Text: "Jakarta"})
 	if err != nil || len(hits) != 0 {
 		t.Fatalf("forgotten fact in search: %+v, %v", hits, err)
 	}
 	// A period query still finds the superseded Bali fact.
-	past, err := s.SearchFacts(ctx, store.FactQuery{
+	past, err := s.SearchFacts(ctx, store.FactQuery{CharacterID: testOwner,
 		Text: "Bali", From: ptr(day(2024, 1, 1)), To: ptr(day(2024, 12, 31)),
 	})
 	if err != nil || len(past) != 1 || past[0].ID != f.ID || past[0].Status != "superseded" {
@@ -74,7 +77,7 @@ func TestFactsLifecycle(t *testing.T) {
 	if err := s.TouchFacts(ctx, []int64{moved.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if f, _ := s.GetFact(ctx, moved.ID); f.UseCount != 1 || f.LastUsedAt == nil {
+	if f, _ := s.GetFact(ctx, testOwner, moved.ID); f.UseCount != 1 || f.LastUsedAt == nil {
 		t.Fatalf("touched fact: %+v", f)
 	}
 
@@ -83,7 +86,7 @@ func TestFactsLifecycle(t *testing.T) {
 	if _, err := s.UpdateFact(ctx, edited); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.GetFact(ctx, edited.ID); got.Text != "lives in Bali (edited)" || got.Core {
+	if got, _ := s.GetFact(ctx, testOwner, edited.ID); got.Text != "lives in Bali (edited)" || got.Core {
 		t.Fatalf("edited fact: %+v", got)
 	}
 }
@@ -95,15 +98,15 @@ func TestImportFactsIdempotent(t *testing.T) {
 		{Text: "prefers short answers", Category: "preference", Core: true},
 		{Text: "has a cat named Miso", Category: "person", Core: true},
 	}
-	n, err := s.ImportFacts(ctx, facts)
+	n, err := s.ImportFacts(ctx, testOwner, facts)
 	if err != nil || n != 2 {
 		t.Fatalf("import: %d, %v", n, err)
 	}
-	n, err = s.ImportFacts(ctx, facts)
+	n, err = s.ImportFacts(ctx, testOwner, facts)
 	if err != nil || n != 0 {
 		t.Fatalf("second import duplicated: %d, %v", n, err)
 	}
-	all, err := s.Facts(ctx, store.FactFilter{Status: []string{"active"}})
+	all, err := s.Facts(ctx, testOwner, store.FactFilter{Status: []string{"active"}})
 	if err != nil || len(all) != 2 || !all[0].Core || all[0].SourceKind != "user" {
 		t.Fatalf("imported facts: %+v, %v", all, err)
 	}
@@ -128,27 +131,27 @@ func TestSearchMessagesAndForget(t *testing.T) {
 	}
 
 	// Indonesian words match Indonesian text, no stemming needed.
-	hits, err := s.SearchMessages(ctx, store.MessageQuery{Text: "laporan"})
+	hits, err := s.SearchMessages(ctx, store.MessageQuery{CharacterID: testOwner, Text: "laporan"})
 	if err != nil || len(hits) != 1 || hits[0].ID != m1.ID {
 		t.Fatalf("search: %+v, %v", hits, err)
 	}
 	if hits[0].CharacterID != "assistant" || hits[0].Day == nil || !store.Day(*hits[0].Day).Equal(day(2026, 11, 1)) {
 		t.Fatalf("hit context: %+v", hits[0])
 	}
-	hits, err = s.SearchMessages(ctx, store.MessageQuery{Text: "laporan", Limit: 5, Exclude: []int64{m1.ID}})
+	hits, err = s.SearchMessages(ctx, store.MessageQuery{CharacterID: testOwner, Text: "laporan", Limit: 5, Exclude: []int64{m1.ID}})
 	if err != nil || len(hits) != 0 {
 		t.Fatalf("excluded hit: %+v, %v", hits, err)
 	}
-	hits, err = s.SearchMessages(ctx, store.MessageQuery{Text: "laporan", From: ptr(day(2026, 11, 2))})
+	hits, err = s.SearchMessages(ctx, store.MessageQuery{CharacterID: testOwner, Text: "laporan", From: ptr(day(2026, 11, 2))})
 	if err != nil || len(hits) != 0 {
 		t.Fatalf("date filter: %+v, %v", hits, err)
 	}
 
 	// Forget hides the message from search and from the prompt window.
-	if err := s.ForgetMessage(ctx, m1.ID); err != nil {
+	if err := s.ForgetMessage(ctx, testOwner, m1.ID); err != nil {
 		t.Fatal(err)
 	}
-	if hits, _ := s.SearchMessages(ctx, store.MessageQuery{Text: "laporan"}); len(hits) != 0 {
+	if hits, _ := s.SearchMessages(ctx, store.MessageQuery{CharacterID: testOwner, Text: "laporan"}); len(hits) != 0 {
 		t.Fatalf("forgotten message found: %+v", hits)
 	}
 	if recent, _ := s.RecentMessages(ctx, "daily:2026-11-01", 10); len(recent) != 0 {
@@ -172,7 +175,7 @@ func TestForgetDay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	n, err := s.ForgetDay(ctx, d, time.Time{}, time.Time{})
+	n, err := s.ForgetDay(ctx, testOwner, d, time.Time{}, time.Time{})
 	if err != nil || n != 2 {
 		t.Fatalf("forget day: %d, %v", n, err)
 	}
@@ -188,21 +191,21 @@ func TestImportDoesNotResurrectForgottenFact(t *testing.T) {
 	s := storetest.New(t)
 	ctx := context.Background()
 	facts := []store.Fact{{Text: "a note I will delete", Category: "general"}}
-	if n, err := s.ImportFacts(ctx, facts); err != nil || n != 1 {
+	if n, err := s.ImportFacts(ctx, testOwner, facts); err != nil || n != 1 {
 		t.Fatalf("import: %d, %v", n, err)
 	}
-	active, _ := s.Facts(ctx, store.FactFilter{Status: []string{"active"}})
+	active, _ := s.Facts(ctx, testOwner, store.FactFilter{Status: []string{"active"}})
 	if len(active) != 1 {
 		t.Fatalf("active: %+v", active)
 	}
-	if err := s.ForgetFact(ctx, active[0].ID, time.Now()); err != nil {
+	if err := s.ForgetFact(ctx, testOwner, active[0].ID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	// A restart imports the same file again; the forgotten note must stay gone.
-	if n, err := s.ImportFacts(ctx, facts); err != nil || n != 0 {
+	if n, err := s.ImportFacts(ctx, testOwner, facts); err != nil || n != 0 {
 		t.Fatalf("re-import: %d, %v", n, err)
 	}
-	if active, _ := s.Facts(ctx, store.FactFilter{Status: []string{"active"}}); len(active) != 0 {
+	if active, _ := s.Facts(ctx, testOwner, store.FactFilter{Status: []string{"active"}}); len(active) != 0 {
 		t.Fatalf("forgotten imported fact came back: %+v", active)
 	}
 }
@@ -221,7 +224,7 @@ func TestForgetClearsSummary(t *testing.T) {
 	if err := s.SetSummary(ctx, "daily:2026-11-01", "summary quoting a private detail", m.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ForgetMessage(ctx, m.ID); err != nil {
+	if err := s.ForgetMessage(ctx, testOwner, m.ID); err != nil {
 		t.Fatal(err)
 	}
 	c, err := s.GetConversation(ctx, "daily:2026-11-01")
@@ -236,14 +239,14 @@ func TestForgetClearsSummary(t *testing.T) {
 func TestUpdateFactClearsItsEmbedding(t *testing.T) {
 	s := storetest.New(t)
 	ctx := context.Background()
-	f, err := s.AddFact(ctx, store.Fact{Text: "lives in Bali", Category: "circumstance", ValidFrom: day(2026, 1, 1)})
+	f, err := s.AddFact(ctx, store.Fact{CharacterID: testOwner, Text: "lives in Bali", Category: "circumstance", ValidFrom: day(2026, 1, 1)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetFactEmbedding(ctx, f.ID, f.Text, unit(0), "fake"); err != nil {
 		t.Fatal(err)
 	}
-	f, _ = s.GetFact(ctx, f.ID)
+	f, _ = s.GetFact(ctx, testOwner, f.ID)
 	f.Text = "lives in Jakarta"
 	if _, err := s.UpdateFact(ctx, f); err != nil {
 		t.Fatal(err)
@@ -272,7 +275,7 @@ func TestSetMessageEmbeddingSkipsForgotten(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ForgetMessage(ctx, m.ID); err != nil {
+	if err := s.ForgetMessage(ctx, testOwner, m.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetMessageEmbedding(ctx, m.ID, unit(0), "fake"); err != nil {
@@ -294,12 +297,12 @@ func TestApplyFactOpsKeepsSourceMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	day := day(2026, 11, 1)
-	if _, err := s.ApplyFactOps(ctx, day, []store.FactOp{{
+	if _, err := s.ApplyFactOps(ctx, testOwner, day, []store.FactOp{{
 		Op: "ADD", Text: "my sister is Ana", Category: "person", Core: false, SourceMessageID: &m.ID,
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	facts, _ := s.Facts(ctx, store.FactFilter{Status: []string{"active"}})
+	facts, _ := s.Facts(ctx, testOwner, store.FactFilter{Status: []string{"active"}})
 	if len(facts) != 1 || facts[0].SourceMessageID == nil || *facts[0].SourceMessageID != m.ID {
 		t.Fatalf("source lost: %+v", facts)
 	}

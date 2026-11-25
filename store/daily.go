@@ -67,13 +67,14 @@ type Reminder struct {
 }
 
 type Checkin struct {
-	Day       time.Time
-	Kind      string
-	Status    string // pending | sent | failed | skipped
-	Attempts  int
-	MessageID *int64
-	RunID     *int64
-	UpdatedAt time.Time
+	Day         time.Time
+	Kind        string
+	CharacterID string
+	Status      string // pending | sent | failed | skipped
+	Attempts    int
+	MessageID   *int64
+	RunID       *int64
+	UpdatedAt   time.Time
 }
 
 // TaskFilter narrows Tasks. Zero values mean "no restriction".
@@ -431,12 +432,15 @@ func (s *Store) Reminders(ctx context.Context, f ReminderFilter) ([]Reminder, er
 	return out, rows.Err()
 }
 
-func (s *Store) Checkin(ctx context.Context, day time.Time, kind string) (Checkin, error) {
+func (s *Store) Checkin(ctx context.Context, day time.Time, kind, characterID string) (Checkin, error) {
+	if err := requireOwner(characterID); err != nil {
+		return Checkin{}, err
+	}
 	var c Checkin
 	err := s.pool.QueryRow(ctx, `
-		SELECT day, kind, status, attempts, message_id, run_id, updated_at
-		FROM checkins WHERE day = $1 AND kind = $2`, Day(day), kind).
-		Scan(&c.Day, &c.Kind, &c.Status, &c.Attempts, &c.MessageID, &c.RunID, &c.UpdatedAt)
+		SELECT day, kind, character_id, status, attempts, message_id, run_id, updated_at
+		FROM checkins WHERE day = $1 AND kind = $2 AND character_id = $3`, Day(day), kind, characterID).
+		Scan(&c.Day, &c.Kind, &c.CharacterID, &c.Status, &c.Attempts, &c.MessageID, &c.RunID, &c.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Checkin{}, ErrNotFound
 	}
@@ -444,31 +448,41 @@ func (s *Store) Checkin(ctx context.Context, day time.Time, kind string) (Checki
 }
 
 // ClaimCheckin inserts a pending row and reports whether this caller got it.
-// The (day, kind) primary key makes a second poll lose the race instead of
-// sending a second check-in.
-func (s *Store) ClaimCheckin(ctx context.Context, day time.Time, kind string) (bool, error) {
+// The (day, kind, character_id) primary key makes a second poll lose the race
+// instead of sending a second check-in; the close job gets exactly one claim per
+// character per day.
+func (s *Store) ClaimCheckin(ctx context.Context, day time.Time, kind, characterID string) (bool, error) {
+	if err := requireOwner(characterID); err != nil {
+		return false, err
+	}
 	tag, err := s.pool.Exec(ctx, `
-		INSERT INTO checkins (day, kind, status) VALUES ($1, $2, 'pending')
-		ON CONFLICT (day, kind) DO NOTHING`, Day(day), kind)
+		INSERT INTO checkins (day, kind, character_id, status) VALUES ($1, $2, $3, 'pending')
+		ON CONFLICT (day, kind, character_id) DO NOTHING`, Day(day), kind, characterID)
 	if err != nil {
 		return false, err
 	}
 	return tag.RowsAffected() == 1, nil
 }
 
-func (s *Store) FinishCheckin(ctx context.Context, day time.Time, kind, status string, messageID, runID *int64) error {
+func (s *Store) FinishCheckin(ctx context.Context, day time.Time, kind, characterID, status string, messageID, runID *int64) error {
+	if err := requireOwner(characterID); err != nil {
+		return err
+	}
 	_, err := s.pool.Exec(ctx, `
-		UPDATE checkins SET status = $3, message_id = $4, run_id = $5, updated_at = now()
-		WHERE day = $1 AND kind = $2`, Day(day), kind, status, messageID, runID)
+		UPDATE checkins SET status = $4, message_id = $5, run_id = $6, updated_at = now()
+		WHERE day = $1 AND kind = $2 AND character_id = $3`, Day(day), kind, characterID, status, messageID, runID)
 	return err
 }
 
 // FailCheckin records a failed attempt and returns the new attempt count.
-func (s *Store) FailCheckin(ctx context.Context, day time.Time, kind string) (int, error) {
+func (s *Store) FailCheckin(ctx context.Context, day time.Time, kind, characterID string) (int, error) {
+	if err := requireOwner(characterID); err != nil {
+		return 0, err
+	}
 	var attempts int
 	err := s.pool.QueryRow(ctx, `
 		UPDATE checkins SET status = 'failed', attempts = attempts + 1, updated_at = now()
-		WHERE day = $1 AND kind = $2 RETURNING attempts`, Day(day), kind).Scan(&attempts)
+		WHERE day = $1 AND kind = $2 AND character_id = $3 RETURNING attempts`, Day(day), kind, characterID).Scan(&attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, ErrNotFound
 	}
@@ -477,11 +491,14 @@ func (s *Store) FailCheckin(ctx context.Context, day time.Time, kind string) (in
 
 // SkipCheckin writes a skipped row, also downgrading a pending or failed row
 // from an earlier poll. A sent check-in is never rewritten.
-func (s *Store) SkipCheckin(ctx context.Context, day time.Time, kind string) error {
+func (s *Store) SkipCheckin(ctx context.Context, day time.Time, kind, characterID string) error {
+	if err := requireOwner(characterID); err != nil {
+		return err
+	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO checkins (day, kind, status) VALUES ($1, $2, 'skipped')
-		ON CONFLICT (day, kind) DO UPDATE SET status = 'skipped', updated_at = now()
-		WHERE checkins.status <> 'sent'`, Day(day), kind)
+		INSERT INTO checkins (day, kind, character_id, status) VALUES ($1, $2, $3, 'skipped')
+		ON CONFLICT (day, kind, character_id) DO UPDATE SET status = 'skipped', updated_at = now()
+		WHERE checkins.status <> 'sent'`, Day(day), kind, characterID)
 	return err
 }
 
@@ -571,8 +588,11 @@ func (s *Store) deleteOne(ctx context.Context, table string, id int64) error {
 }
 
 // DeleteCheckin removes a check-in row (undo of skip_checkin).
-func (s *Store) DeleteCheckin(ctx context.Context, day time.Time, kind string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM checkins WHERE day = $1 AND kind = $2`, Day(day), kind)
+func (s *Store) DeleteCheckin(ctx context.Context, day time.Time, kind, characterID string) error {
+	if err := requireOwner(characterID); err != nil {
+		return err
+	}
+	tag, err := s.pool.Exec(ctx, `DELETE FROM checkins WHERE day = $1 AND kind = $2 AND character_id = $3`, Day(day), kind, characterID)
 	if err != nil {
 		return err
 	}

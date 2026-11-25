@@ -15,6 +15,7 @@ import (
 // period question still finds it. Forget() keeps the row, marked forgotten.
 type Fact struct {
 	ID              int64
+	CharacterID     string // the agent that was told; facts never cross agents
 	Text            string
 	Category        string // preference | person | circumstance | goal | work | health | general
 	Core            bool
@@ -51,12 +52,12 @@ func ValidFactCategory(category string) bool {
 	return false
 }
 
-const factCols = `id, text, category, core, status, source_kind, source_message_id, superseded_by,
+const factCols = `id, character_id, text, category, core, status, source_kind, source_message_id, superseded_by,
 	valid_from, valid_to, last_used_at, use_count, created_at, updated_at`
 
 func scanFact(row pgx.Row) (Fact, error) {
 	var f Fact
-	err := row.Scan(&f.ID, &f.Text, &f.Category, &f.Core, &f.Status, &f.SourceKind, &f.SourceMessageID,
+	err := row.Scan(&f.ID, &f.CharacterID, &f.Text, &f.Category, &f.Core, &f.Status, &f.SourceKind, &f.SourceMessageID,
 		&f.SupersededBy, &f.ValidFrom, &f.ValidTo, &f.LastUsedAt, &f.UseCount, &f.CreatedAt, &f.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Fact{}, ErrNotFound
@@ -64,8 +65,12 @@ func scanFact(row pgx.Row) (Fact, error) {
 	return f, err
 }
 
-// AddFact inserts a fact. valid_from defaults to today when unset.
+// AddFact inserts a fact for one character. valid_from defaults to today when
+// unset.
 func (s *Store) AddFact(ctx context.Context, f Fact) (Fact, error) {
+	if err := requireOwner(f.CharacterID); err != nil {
+		return Fact{}, err
+	}
 	if f.ValidFrom.IsZero() {
 		f.ValidFrom = time.Now()
 	}
@@ -76,21 +81,28 @@ func (s *Store) AddFact(ctx context.Context, f Fact) (Fact, error) {
 		f.SourceKind = "user"
 	}
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO facts (text, category, core, status, source_kind, source_message_id, valid_from)
-		VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'active'), $5, $6, $7)
+		INSERT INTO facts (character_id, text, category, core, status, source_kind, source_message_id, valid_from)
+		VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, ''), 'active'), $6, $7, $8)
 		RETURNING `+factCols,
-		strings.TrimSpace(f.Text), f.Category, f.Core, f.Status, f.SourceKind, f.SourceMessageID, Day(f.ValidFrom))
+		f.CharacterID, strings.TrimSpace(f.Text), f.Category, f.Core, f.Status, f.SourceKind, f.SourceMessageID, Day(f.ValidFrom))
 	return scanFact(row)
 }
 
-func (s *Store) GetFact(ctx context.Context, id int64) (Fact, error) {
-	return scanFact(s.pool.QueryRow(ctx, `SELECT `+factCols+` FROM facts WHERE id = $1`, id))
+// GetFact reads one character's fact; another character's id is not found.
+func (s *Store) GetFact(ctx context.Context, characterID string, id int64) (Fact, error) {
+	if err := requireOwner(characterID); err != nil {
+		return Fact{}, err
+	}
+	return scanFact(s.pool.QueryRow(ctx, `SELECT `+factCols+` FROM facts WHERE id = $1 AND character_id = $2`, id, characterID))
 }
 
-// Facts lists facts by status, core flag, category and order.
-func (s *Store) Facts(ctx context.Context, f FactFilter) ([]Fact, error) {
-	var where []string
-	var args []any
+// Facts lists one character's facts by status, core flag, category and order.
+func (s *Store) Facts(ctx context.Context, characterID string, f FactFilter) ([]Fact, error) {
+	if err := requireOwner(characterID); err != nil {
+		return nil, err
+	}
+	args := []any{characterID}
+	where := []string{"character_id = $1"}
 	add := func(cond string, v any) {
 		args = append(args, v)
 		where = append(where, fmt.Sprintf(cond, len(args)))
@@ -105,9 +117,7 @@ func (s *Store) Facts(ctx context.Context, f FactFilter) ([]Fact, error) {
 		add("category = $%d", f.Category)
 	}
 	q := `SELECT ` + factCols + ` FROM facts`
-	if len(where) > 0 {
-		q += " WHERE " + strings.Join(where, " AND ")
-	}
+	q += " WHERE " + strings.Join(where, " AND ")
 	switch f.Order {
 	case "recent":
 		q += ` ORDER BY created_at DESC, id DESC`
@@ -137,45 +147,46 @@ func (s *Store) Facts(ctx context.Context, f FactFilter) ([]Fact, error) {
 }
 
 // UpdateFact writes the editable fields (text, category, core, status,
-// validity) and bumps updated_at. It never removes a row.
+// validity) of one character's fact and bumps updated_at. It never removes a
+// row and never moves a fact to another owner.
 func (s *Store) UpdateFact(ctx context.Context, f Fact) (Fact, error) {
+	if err := requireOwner(f.CharacterID); err != nil {
+		return Fact{}, err
+	}
 	row := s.pool.QueryRow(ctx, `
 		UPDATE facts SET
 			embedding = CASE WHEN text IS DISTINCT FROM $2 THEN NULL ELSE embedding END,
 			embedding_model = CASE WHEN text IS DISTINCT FROM $2 THEN NULL ELSE embedding_model END,
 			text = $2, category = $3, core = $4, status = $5,
 			valid_from = $6, valid_to = $7, superseded_by = $8, updated_at = now()
-		WHERE id = $1
+		WHERE id = $1 AND character_id = $9
 		RETURNING `+factCols,
-		f.ID, strings.TrimSpace(f.Text), f.Category, f.Core, f.Status, Day(f.ValidFrom), f.ValidTo, f.SupersededBy)
+		f.ID, strings.TrimSpace(f.Text), f.Category, f.Core, f.Status, Day(f.ValidFrom), f.ValidTo, f.SupersededBy, f.CharacterID)
 	return scanFact(row)
 }
 
 // Supersede closes oldID the day before newID becomes valid and links the two.
-func (s *Store) Supersede(ctx context.Context, oldID, newID int64) error {
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE facts SET status = 'superseded', superseded_by = $2, valid_to = (
-			SELECT GREATEST($3::date - 1, valid_from) FROM facts WHERE id = $2
-		), updated_at = now()
-		WHERE id = $1 AND status = 'active'`,
-		oldID, newID, Day(time.Now()))
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+// Both must belong to the same character.
+func (s *Store) Supersede(ctx context.Context, characterID string, oldID, newID int64) error {
+	return s.supersedeOn(ctx, characterID, oldID, newID, Day(time.Now()))
 }
 
 // SupersedeOn is Supersede with an explicit effective date (the day the new
 // fact starts being true).
-func (s *Store) SupersedeOn(ctx context.Context, oldID, newID int64, from time.Time) error {
+func (s *Store) SupersedeOn(ctx context.Context, characterID string, oldID, newID int64, from time.Time) error {
+	return s.supersedeOn(ctx, characterID, oldID, newID, Day(from))
+}
+
+func (s *Store) supersedeOn(ctx context.Context, characterID string, oldID, newID int64, from time.Time) error {
+	if err := requireOwner(characterID); err != nil {
+		return err
+	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE facts SET status = 'superseded', superseded_by = $2,
 			valid_to = GREATEST($3::date - 1, valid_from), updated_at = now()
-		WHERE id = $1 AND status = 'active'`,
-		oldID, newID, Day(from))
+		WHERE id = $1 AND character_id = $4 AND status = 'active'
+		  AND EXISTS (SELECT 1 FROM facts WHERE id = $2 AND character_id = $4)`,
+		oldID, newID, from, characterID)
 	if err != nil {
 		return err
 	}
@@ -185,12 +196,16 @@ func (s *Store) SupersedeOn(ctx context.Context, oldID, newID int64, from time.T
 	return nil
 }
 
-// ForgetFact marks a fact forgotten (no hard delete). ForgetMessage hides the
-// source message from search, context, extraction and embeddings.
-func (s *Store) ForgetFact(ctx context.Context, id int64, on time.Time) error {
+// ForgetFact marks one character's fact forgotten (no hard delete).
+// ForgetMessage hides the source message from search, context, extraction and
+// embeddings.
+func (s *Store) ForgetFact(ctx context.Context, characterID string, id int64, on time.Time) error {
+	if err := requireOwner(characterID); err != nil {
+		return err
+	}
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE facts SET status = 'forgotten', valid_to = COALESCE(valid_to, $2), updated_at = now()
-		WHERE id = $1 AND status <> 'forgotten'`, id, Day(on))
+		UPDATE facts SET status = 'forgotten', valid_to = COALESCE(valid_to, $3), updated_at = now()
+		WHERE id = $1 AND character_id = $2 AND status <> 'forgotten'`, id, characterID, Day(on))
 	if err != nil {
 		return err
 	}
@@ -200,31 +215,43 @@ func (s *Store) ForgetFact(ctx context.Context, id int64, on time.Time) error {
 	return nil
 }
 
-func (s *Store) ForgetMessage(ctx context.Context, id int64) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE messages SET forgotten_at = now() WHERE id = $1`, id)
-	if err != nil {
+// ForgetMessage hides one message of a character's own conversation.
+func (s *Store) ForgetMessage(ctx context.Context, characterID string, id int64) error {
+	if err := requireOwner(characterID); err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	var convID string
+	err := s.pool.QueryRow(ctx, `
+		UPDATE messages m SET forgotten_at = now()
+		FROM conversations c
+		WHERE m.conversation_id = c.id AND m.id = $1 AND c.character_id = $2
+		RETURNING m.conversation_id`, id, characterID).Scan(&convID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
+	}
+	if err != nil {
+		return err
 	}
 	// A stored summary may quote the message; drop it so it cannot come back
 	// through the next turn. It is regenerated from the remaining messages.
 	_, err = s.pool.Exec(ctx, `
 		UPDATE conversations SET summary = NULL, summary_upto = NULL
-		WHERE id = (SELECT conversation_id FROM messages WHERE id = $1)`, id)
+		WHERE id = $1`, convID)
 	return err
 }
 
-// ForgetDay hides every non-forgotten message the user sent or received on a
-// logical day (the daily threads' day, or the local date of other messages).
-func (s *Store) ForgetDay(ctx context.Context, day time.Time, from, to time.Time) (int64, error) {
+// ForgetDay hides every non-forgotten message one character sent or received on
+// a logical day (the daily threads' day, or the local date of other messages).
+func (s *Store) ForgetDay(ctx context.Context, characterID string, day time.Time, from, to time.Time) (int64, error) {
+	if err := requireOwner(characterID); err != nil {
+		return 0, err
+	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE messages m SET forgotten_at = now()
 		FROM conversations c
-		WHERE m.conversation_id = c.id AND m.forgotten_at IS NULL
-		  AND ((c.day = $1) OR (c.day IS NULL AND m.created_at >= $2 AND m.created_at < $3))`,
-		Day(day), from, to)
+		WHERE m.conversation_id = c.id AND m.forgotten_at IS NULL AND c.character_id = $3
+		  AND ((c.day = $1) OR (c.day IS NULL AND m.created_at >= $2 AND m.created_at < $4))`,
+		Day(day), from, characterID, to)
 	if err != nil {
 		return 0, err
 	}
@@ -232,10 +259,10 @@ func (s *Store) ForgetDay(ctx context.Context, day time.Time, from, to time.Time
 	// regenerates them from what is left.
 	_, err = s.pool.Exec(ctx, `
 		UPDATE conversations c SET summary = NULL, summary_upto = NULL
-		WHERE (c.day = $1) OR (c.day IS NULL AND EXISTS (
+		WHERE c.character_id = $3 AND ((c.day = $1) OR (c.day IS NULL AND EXISTS (
 			SELECT 1 FROM messages m
-			WHERE m.conversation_id = c.id AND m.created_at >= $2 AND m.created_at < $3))`,
-		Day(day), from, to)
+			WHERE m.conversation_id = c.id AND m.created_at >= $2 AND m.created_at < $4)))`,
+		Day(day), from, characterID, to)
 	if err != nil {
 		return 0, err
 	}
@@ -252,22 +279,24 @@ func (s *Store) TouchFacts(ctx context.Context, ids []int64) error {
 	return err
 }
 
-// CoreFacts returns active core facts, newest-used first, capped by the caller's
-// prompt budget.
-func (s *Store) CoreFacts(ctx context.Context, limit int) ([]Fact, error) {
+// CoreFacts returns one character's active core facts, newest-used first,
+// capped by the caller's prompt budget.
+func (s *Store) CoreFacts(ctx context.Context, characterID string, limit int) ([]Fact, error) {
 	core := true
-	return s.Facts(ctx, FactFilter{Status: []string{"active"}, Core: &core, Limit: limit})
+	return s.Facts(ctx, characterID, FactFilter{Status: []string{"active"}, Core: &core, Limit: limit})
 }
 
 // --- search ---------------------------------------------------------------
 
-// MessageQuery is a full-text search over all conversations.
+// MessageQuery is a full-text search inside one character's conversations.
+// CharacterID is required: there is no search across agents.
 type MessageQuery struct {
-	Text  string
-	From  *time.Time // inclusive local day
-	To    *time.Time // inclusive local day
-	TZ    string     // zone for messages without a daily thread; default UTC
-	Limit int
+	CharacterID string
+	Text        string
+	From        *time.Time // inclusive local day
+	To          *time.Time // inclusive local day
+	TZ          string     // zone for messages without a daily thread; default UTC
+	Limit       int
 	// Vector makes the search hybrid (RRF of full-text and cosine). Empty
 	// means keyword-only, which is the fallback when Ollama is not running.
 	Vector         []float32
@@ -294,6 +323,9 @@ type MessageHit struct {
 // mixed Indonesian/English works without pretending one language.
 // SearchMessages is keyword-only, or hybrid when q.Vector is set.
 func (s *Store) SearchMessages(ctx context.Context, q MessageQuery) ([]MessageHit, error) {
+	if err := requireOwner(q.CharacterID); err != nil {
+		return nil, err
+	}
 	if len(q.Vector) == 0 || q.EmbeddingModel == "" {
 		return s.searchMessagesKeyword(ctx, q)
 	}
@@ -315,12 +347,12 @@ func (s *Store) searchMessagesKeyword(ctx context.Context, q MessageQuery) ([]Me
 	if text == "" {
 		return nil, nil
 	}
-	args := []any{text}
+	args := []any{text, q.CharacterID}
 	limit := q.Limit
 	if limit <= 0 || limit > 50 {
 		limit = 10
 	}
-	where := `m.forgotten_at IS NULL AND m.role IN ('user','assistant') AND m.search @@ websearch_to_tsquery('simple', $1)`
+	where := `m.forgotten_at IS NULL AND c.character_id = $2 AND m.role IN ('user','assistant') AND m.search @@ websearch_to_tsquery('simple', $1)`
 	if q.From != nil || q.To != nil {
 		tz := q.TZ
 		if tz == "" {
@@ -365,13 +397,15 @@ func (s *Store) searchMessagesKeyword(ctx context.Context, q MessageQuery) ([]Me
 	return out, rows.Err()
 }
 
-// FactQuery is a full-text search over facts, optionally over a period (facts
-// that were valid at any point in range, superseded included).
+// FactQuery is a full-text search inside one character's facts, optionally over
+// a period (facts that were valid at any point in range, superseded included).
+// CharacterID is required: there is no search across agents.
 type FactQuery struct {
-	Text  string
-	From  *time.Time
-	To    *time.Time
-	Limit int
+	CharacterID string
+	Text        string
+	From        *time.Time
+	To          *time.Time
+	Limit       int
 	// Vector and EmbeddingModel turn on hybrid search (M-10).
 	Vector         []float32
 	EmbeddingModel string
@@ -379,6 +413,9 @@ type FactQuery struct {
 
 // SearchFacts is keyword-only, or hybrid when q.Vector is set.
 func (s *Store) SearchFacts(ctx context.Context, q FactQuery) ([]Fact, error) {
+	if err := requireOwner(q.CharacterID); err != nil {
+		return nil, err
+	}
 	if len(q.Vector) == 0 || q.EmbeddingModel == "" {
 		return s.searchFactsKeyword(ctx, q)
 	}
@@ -400,12 +437,12 @@ func (s *Store) searchFactsKeyword(ctx context.Context, q FactQuery) ([]Fact, er
 	if text == "" {
 		return nil, nil
 	}
-	args := []any{text}
+	args := []any{text, q.CharacterID}
 	limit := q.Limit
 	if limit <= 0 || limit > 50 {
 		limit = 10
 	}
-	where := `status <> 'forgotten' AND search @@ websearch_to_tsquery('simple', $1)`
+	where := `character_id = $2 AND status <> 'forgotten' AND search @@ websearch_to_tsquery('simple', $1)`
 	if q.From != nil {
 		args = append(args, Day(*q.From))
 		where += fmt.Sprintf(" AND (valid_to IS NULL OR valid_to >= $%d::date)", len(args))
@@ -438,10 +475,14 @@ func (s *Store) searchFactsKeyword(ctx context.Context, q FactQuery) ([]Fact, er
 	return out, rows.Err()
 }
 
-// ImportFacts inserts facts from the old memory/<char>.json files once. A fact
-// whose text is already active is skipped, so restarts do not duplicate it.
-// The caller decides core; the old always-in-prompt notes import as core.
-func (s *Store) ImportFacts(ctx context.Context, facts []Fact) (int, error) {
+// ImportFacts inserts a character's facts from the old memory/<char>.json files
+// once. A fact whose text is already active for that same character is skipped,
+// so restarts do not duplicate it. The caller decides core; the old
+// always-in-prompt notes import as core.
+func (s *Store) ImportFacts(ctx context.Context, characterID string, facts []Fact) (int, error) {
+	if err := requireOwner(characterID); err != nil {
+		return 0, err
+	}
 	imported := 0
 	for _, f := range facts {
 		text := strings.TrimSpace(f.Text)
@@ -455,11 +496,11 @@ func (s *Store) ImportFacts(ctx context.Context, facts []Fact) (int, error) {
 			f.Category = "general"
 		}
 		tag, err := s.pool.Exec(ctx, `
-			INSERT INTO facts (text, category, core, source_kind, valid_from)
-			SELECT $1, $2, $3, 'user', $4
+			INSERT INTO facts (character_id, text, category, core, source_kind, valid_from)
+			SELECT $1, $2, $3, $4, 'user', $5
 			WHERE NOT EXISTS (
-				SELECT 1 FROM facts WHERE lower(text) = lower($1)
-			)`, text, f.Category, f.Core, Day(f.ValidFrom))
+				SELECT 1 FROM facts WHERE character_id = $1 AND lower(text) = lower($2)
+			)`, characterID, text, f.Category, f.Core, Day(f.ValidFrom))
 		if err != nil {
 			return imported, err
 		}
@@ -479,9 +520,14 @@ type FactOp struct {
 	SourceMessageID *int64 // the message the day-close job extracted it from
 }
 
-// ApplyFactOps writes a day's extracted facts atomically. SUPERSEDE inserts the
-// new fact and closes the old one on the day the new one starts.
-func (s *Store) ApplyFactOps(ctx context.Context, day time.Time, ops []FactOp) (int, error) {
+// ApplyFactOps writes one character's day of extracted facts atomically.
+// SUPERSEDE inserts the new fact and closes the old one on the day the new one
+// starts. The SQL repeats the owner check: a cross-owner supersede can never
+// take effect even if validation is bypassed.
+func (s *Store) ApplyFactOps(ctx context.Context, characterID string, day time.Time, ops []FactOp) (int, error) {
+	if err := requireOwner(characterID); err != nil {
+		return 0, err
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -497,9 +543,9 @@ func (s *Store) ApplyFactOps(ctx context.Context, day time.Time, ops []FactOp) (
 		switch op.Op {
 		case "ADD":
 			_, err := tx.Exec(ctx, `
-				INSERT INTO facts (text, category, core, source_kind, valid_from, source_message_id)
-				VALUES ($1, $2, $3, 'extraction', $4, $5)`,
-				strings.TrimSpace(op.Text), category, op.Core, Day(day), op.SourceMessageID)
+				INSERT INTO facts (character_id, text, category, core, source_kind, valid_from, source_message_id)
+				VALUES ($1, $2, $3, $4, 'extraction', $5, $6)`,
+				characterID, strings.TrimSpace(op.Text), category, op.Core, Day(day), op.SourceMessageID)
 			if err != nil {
 				return applied, err
 			}
@@ -507,22 +553,22 @@ func (s *Store) ApplyFactOps(ctx context.Context, day time.Time, ops []FactOp) (
 		case "SUPERSEDE":
 			var newID int64
 			err := tx.QueryRow(ctx, `
-				INSERT INTO facts (text, category, core, source_kind, valid_from, source_message_id)
-				VALUES ($1, $2, $3, 'extraction', $4, $5)
+				INSERT INTO facts (character_id, text, category, core, source_kind, valid_from, source_message_id)
+				VALUES ($1, $2, $3, $4, 'extraction', $5, $6)
 				RETURNING id`,
-				strings.TrimSpace(op.Text), category, op.Core, Day(day), op.SourceMessageID).Scan(&newID)
+				characterID, strings.TrimSpace(op.Text), category, op.Core, Day(day), op.SourceMessageID).Scan(&newID)
 			if err != nil {
 				return applied, err
 			}
 			tag, err := tx.Exec(ctx, `
 				UPDATE facts SET status = 'superseded', superseded_by = $2,
 					valid_to = GREATEST($3::date - 1, valid_from), updated_at = now()
-				WHERE id = $1 AND status = 'active'`, op.ID, newID, Day(day))
+				WHERE id = $1 AND character_id = $4 AND status = 'active'`, op.ID, newID, Day(day), characterID)
 			if err != nil {
 				return applied, err
 			}
 			if tag.RowsAffected() == 0 {
-				return applied, fmt.Errorf("fact %d is not active", op.ID)
+				return applied, fmt.Errorf("fact %d is not active for %s", op.ID, characterID)
 			}
 			applied++
 		}
@@ -542,16 +588,20 @@ type DayMessage struct {
 	CreatedAt   time.Time
 }
 
-// DayMessages returns the user/assistant messages of a logical day across every
-// conversation (persona chats included), minus forgotten ones. Daily threads
-// are selected by conversations.day; other chats by local date.
-func (s *Store) DayMessages(ctx context.Context, day time.Time, from, to time.Time) ([]DayMessage, error) {
+// DayMessages returns one character's user/assistant messages of a logical day,
+// minus forgotten ones. Daily threads are selected by conversations.day; other
+// chats by local date. There is no all-characters variant: the close job asks
+// once per owner.
+func (s *Store) DayMessages(ctx context.Context, characterID string, day time.Time, from, to time.Time) ([]DayMessage, error) {
+	if err := requireOwner(characterID); err != nil {
+		return nil, err
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT m.id, c.character_id, m.role, m.content, m.created_at
 		FROM messages m JOIN conversations c ON c.id = m.conversation_id
-		WHERE m.forgotten_at IS NULL AND m.role IN ('user','assistant')
+		WHERE m.forgotten_at IS NULL AND m.role IN ('user','assistant') AND c.character_id = $4
 		  AND ((c.day = $1) OR (c.day IS NULL AND m.created_at >= $2 AND m.created_at < $3))
-		ORDER BY m.id`, Day(day), from, to)
+		ORDER BY m.id`, Day(day), from, to, characterID)
 	if err != nil {
 		return nil, err
 	}
@@ -563,6 +613,30 @@ func (s *Store) DayMessages(ctx context.Context, day time.Time, from, to time.Ti
 			return nil, err
 		}
 		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// DayCharacters lists the characters that said something on a logical day, so
+// the close job can run once per owner (sorted, so a poll is deterministic).
+func (s *Store) DayCharacters(ctx context.Context, day time.Time, from, to time.Time) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT c.character_id
+		FROM messages m JOIN conversations c ON c.id = m.conversation_id
+		WHERE m.forgotten_at IS NULL AND m.role IN ('user','assistant')
+		  AND ((c.day = $1) OR (c.day IS NULL AND m.created_at >= $2 AND m.created_at < $3))
+		ORDER BY c.character_id`, Day(day), from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
 	}
 	return out, rows.Err()
 }
@@ -581,16 +655,19 @@ func (s *Store) SetSummary(ctx context.Context, conversationID, summary string, 
 	return err
 }
 
-// NotedFacts lists facts extracted since an instant (the start of today), so a
-// check-in can say "I noted: …" and the user can correct it.
-func (s *Store) NotedFacts(ctx context.Context, since time.Time, limit int) ([]Fact, error) {
+// NotedFacts lists one character's facts extracted since an instant (the start
+// of today), so a check-in can say "I noted: …" and the user can correct it.
+func (s *Store) NotedFacts(ctx context.Context, characterID string, since time.Time, limit int) ([]Fact, error) {
+	if err := requireOwner(characterID); err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 8
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT `+factCols+` FROM facts
-		WHERE status = 'active' AND source_kind = 'extraction' AND created_at >= $1
-		ORDER BY id DESC LIMIT $2`, since, limit)
+		WHERE character_id = $3 AND status = 'active' AND source_kind = 'extraction' AND created_at >= $1
+		ORDER BY id DESC LIMIT $2`, since, limit, characterID)
 	if err != nil {
 		return nil, err
 	}
@@ -606,24 +683,28 @@ func (s *Store) NotedFacts(ctx context.Context, since time.Time, limit int) ([]F
 	return out, rows.Err()
 }
 
-// FactHistory returns a fact's whole supersede chain, oldest first (the fact
-// that was current, everything that replaced it, and its predecessor).
-func (s *Store) FactHistory(ctx context.Context, id int64) ([]Fact, error) {
-	cur, err := s.GetFact(ctx, id)
+// FactHistory returns one character's fact and its whole supersede chain,
+// oldest first (the fact that was current, everything that replaced it, and its
+// predecessor). Another character's chain is never reachable.
+func (s *Store) FactHistory(ctx context.Context, characterID string, id int64) ([]Fact, error) {
+	if err := requireOwner(characterID); err != nil {
+		return nil, err
+	}
+	cur, err := s.GetFact(ctx, characterID, id)
 	if err != nil {
 		return nil, err
 	}
 	// Walk back to the oldest fact in the chain.
 	for i := 0; i < 50; i++ {
 		var prevID int64
-		err := s.pool.QueryRow(ctx, `SELECT id FROM facts WHERE superseded_by = $1 LIMIT 1`, cur.ID).Scan(&prevID)
+		err := s.pool.QueryRow(ctx, `SELECT id FROM facts WHERE superseded_by = $1 AND character_id = $2 LIMIT 1`, cur.ID, characterID).Scan(&prevID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			break
 		}
 		if err != nil {
 			return nil, err
 		}
-		if cur, err = s.GetFact(ctx, prevID); err != nil {
+		if cur, err = s.GetFact(ctx, characterID, prevID); err != nil {
 			return nil, err
 		}
 	}
@@ -636,7 +717,7 @@ func (s *Store) FactHistory(ctx context.Context, id int64) ([]Fact, error) {
 		if cur.SupersededBy == nil {
 			break
 		}
-		if cur, err = s.GetFact(ctx, *cur.SupersededBy); err != nil {
+		if cur, err = s.GetFact(ctx, characterID, *cur.SupersededBy); err != nil {
 			return out, err
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -15,6 +16,17 @@ import (
 
 // ErrNotFound is returned by Get* methods when the row does not exist.
 var ErrNotFound = errors.New("store: not found")
+
+// ErrOwnerRequired is returned by every fact/message read that forgot to name
+// the character it acts for. There is deliberately no "all characters" mode.
+var ErrOwnerRequired = errors.New("store: a character id is required")
+
+func requireOwner(characterID string) error {
+	if strings.TrimSpace(characterID) == "" {
+		return ErrOwnerRequired
+	}
+	return nil
+}
 
 // Store is a Postgres connection pool with the schema migrated.
 type Store struct {
@@ -218,14 +230,18 @@ func (s *Store) AddMessageAt(ctx context.Context, m Message, at time.Time) (Mess
 	return m, err
 }
 
-// GetMessage returns one message (to show where a fact came from, or to hide
-// it when the fact is forgotten).
-func (s *Store) GetMessage(ctx context.Context, id int64) (Message, error) {
+// GetMessage returns one of a character's messages (to show where a fact came
+// from, or to hide it when the fact is forgotten).
+func (s *Store) GetMessage(ctx context.Context, characterID string, id int64) (Message, error) {
+	if err := requireOwner(characterID); err != nil {
+		return Message{}, err
+	}
 	var m Message
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, conversation_id, role, content, COALESCE(tool_calls, 'null'::jsonb),
-		       COALESCE(tool_call_id, ''), run_id, created_at, forgotten_at
-		FROM messages WHERE id = $1`, id).
+		SELECT m.id, m.conversation_id, m.role, m.content, COALESCE(m.tool_calls, 'null'::jsonb),
+		       COALESCE(m.tool_call_id, ''), m.run_id, m.created_at, m.forgotten_at
+		FROM messages m JOIN conversations c ON c.id = m.conversation_id
+		WHERE m.id = $1 AND c.character_id = $2`, id, characterID).
 		Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &m.ToolCalls,
 			&m.ToolCallID, &m.RunID, &m.CreatedAt, &m.ForgottenAt)
 	if errors.Is(err, pgx.ErrNoRows) {

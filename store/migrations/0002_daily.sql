@@ -51,11 +51,12 @@ CREATE INDEX reminders_due ON reminders (remind_at) WHERE status = 'pending';
 CREATE TABLE checkins (                     -- also records which days are closed
   day date NOT NULL,
   kind text NOT NULL,                        -- morning | evening | close (day-close job, Phase 2)
+  character_id text NOT NULL,                -- the close job closes one (day, character) at a time
   status text NOT NULL CHECK (status IN ('pending','sent','failed','skipped')),  -- 'sent' = done, for close
   attempts int NOT NULL DEFAULT 0,
   message_id bigint REFERENCES messages(id), run_id bigint REFERENCES runs(id),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (day, kind)                    -- idempotency: two tabs polling can't double-send
+  PRIMARY KEY (day, kind, character_id)      -- idempotency: two tabs polling can't double-send
 );
 
 CREATE TABLE settings (key text PRIMARY KEY, value text NOT NULL);

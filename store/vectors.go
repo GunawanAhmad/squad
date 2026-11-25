@@ -162,8 +162,8 @@ func (s *Store) searchMessagesVector(ctx context.Context, q MessageQuery) ([]Mes
 	if len(q.Vector) == 0 || q.EmbeddingModel == "" {
 		return nil, nil
 	}
-	args := []any{FormatVector(q.Vector), q.EmbeddingModel}
-	where := `m.forgotten_at IS NULL AND m.embedding IS NOT NULL AND m.embedding_model = $2`
+	args := []any{FormatVector(q.Vector), q.EmbeddingModel, q.CharacterID}
+	where := `m.forgotten_at IS NULL AND c.character_id = $3 AND m.embedding IS NOT NULL AND m.embedding_model = $2`
 	if q.From != nil || q.To != nil {
 		tz := q.TZ
 		if tz == "" {
@@ -218,8 +218,8 @@ func (s *Store) searchFactsVector(ctx context.Context, q FactQuery) ([]Fact, err
 	if len(q.Vector) == 0 || q.EmbeddingModel == "" {
 		return nil, nil
 	}
-	args := []any{FormatVector(q.Vector), q.EmbeddingModel}
-	where := `status <> 'forgotten' AND embedding IS NOT NULL AND embedding_model = $2`
+	args := []any{FormatVector(q.Vector), q.EmbeddingModel, q.CharacterID}
+	where := `character_id = $3 AND status <> 'forgotten' AND embedding IS NOT NULL AND embedding_model = $2`
 	if q.From != nil {
 		args = append(args, Day(*q.From))
 		where += fmt.Sprintf(" AND (valid_to IS NULL OR valid_to >= $%d::date)", len(args))
