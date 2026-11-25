@@ -43,7 +43,7 @@ type config struct {
 
 var assistantTools = []string{
 	"plan_tasks", "update_task", "complete_task", "list_tasks",
-	"log_activity", "query_activities", "get_overview",
+	"log_activity", "query_activities", "get_overview", "get_summary",
 	"remind_me", "list_reminders", "cancel_reminder",
 	"skip_checkin", "undo",
 }
