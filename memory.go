@@ -44,7 +44,12 @@ const coreFactsBudget = 2000
 // (active, source kind 'user', core: they used to be always in the prompt).
 // It is idempotent: an active fact with the same text is skipped, so restarts
 // do not duplicate anything. Missing directory is fine.
+const legacyImportSetting = "legacy_facts_imported"
+
 func importMemoryFacts(ctx context.Context, db *store.Store, dir string) (int, error) {
+	if set, err := db.Settings(ctx); err == nil && set[legacyImportSetting] == "1" {
+		return 0, nil
+	}
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return 0, nil
@@ -76,7 +81,16 @@ func importMemoryFacts(ctx context.Context, db *store.Store, dir string) (int, e
 			})
 		}
 	}
-	return db.ImportFacts(ctx, facts)
+	n, err := db.ImportFacts(ctx, facts)
+	if err != nil {
+		return n, err
+	}
+	// One shot: a fact the user edits or forgets must not be re-imported on
+	// the next restart.
+	if err := db.SetSettings(ctx, map[string]string{legacyImportSetting: "1"}); err != nil {
+		return n, err
+	}
+	return n, nil
 }
 
 // readProfile returns memory/profile.md, or "" when the user has not written one.
@@ -104,12 +118,6 @@ func memoryPrompt(profile string, facts []store.Fact) string {
 	b.WriteString(memoryGuard)
 	b.WriteString("\n")
 
-	if profile != "" {
-		b.WriteString("\n<about_user>\n")
-		b.WriteString(profile)
-		b.WriteString("\n</about_user>\n")
-	}
-
 	if len(facts) > 0 {
 		b.WriteString("\n<facts>\n")
 		used := 0
@@ -130,6 +138,12 @@ func memoryPrompt(profile string, facts []store.Fact) string {
 			b.WriteString(line[:min(len(line), coreFactsBudget)])
 		}
 		b.WriteString("</facts>\n")
+	}
+
+	if profile != "" {
+		b.WriteString("\n<about_user>\n")
+		b.WriteString(profile)
+		b.WriteString("\n</about_user>\n")
 	}
 
 	b.WriteString("\n</memory>\n")

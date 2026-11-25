@@ -236,11 +236,27 @@ func TestValidateCloseDocRejectsDuplicateSupersede(t *testing.T) {
 		{"op":"SUPERSEDE","id":1,"text":"lives in Jakarta","category":"circumstance"},
 		{"op":"SUPERSEDE","id":1,"text":"lives in Bandung","category":"circumstance"}
 	]}`)
-	ops, rejects := validateCloseDoc(raw, facts)
+	ops, rejects := validateCloseDoc(raw, facts, nil)
 	if len(ops) != 1 || ops[0].Text != "lives in Jakarta" {
 		t.Fatalf("ops: %+v", ops)
 	}
 	if len(rejects) != 1 || !strings.Contains(rejects[0], "inactive") {
+		t.Fatalf("rejects: %+v", rejects)
+	}
+}
+
+func TestValidateCloseDocChecksSourceMessage(t *testing.T) {
+	facts := []store.Fact{{ID: 1, Text: "lives in Bali", Status: "active", Category: "circumstance"}}
+	msgs := []store.DayMessage{{ID: 5}}
+	raw := json.RawMessage(`{"facts":[
+		{"op":"ADD","text":"has a sister named Ana","category":"person","source_message_id":99},
+		{"op":"ADD","text":"has a sister named Ana","category":"person","source_message_id":5}
+	]}`)
+	ops, rejects := validateCloseDoc(raw, facts, msgs)
+	if len(ops) != 1 || ops[0].SourceMessageID == nil || *ops[0].SourceMessageID != 5 {
+		t.Fatalf("ops: %+v", ops)
+	}
+	if len(rejects) != 1 || !strings.Contains(rejects[0], "not from this day") {
 		t.Fatalf("rejects: %+v", rejects)
 	}
 }

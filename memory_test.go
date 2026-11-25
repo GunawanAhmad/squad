@@ -56,6 +56,31 @@ func TestImportMemoryFacts(t *testing.T) {
 	if n, err := importMemoryFacts(context.Background(), db, dir); err != nil || n != 0 {
 		t.Fatalf("second import: %d, %v", n, err)
 	}
+	// Editing an imported note must not resurrect the old text either: the
+	// import is one shot, not a text-based merge on every boot.
+	before, _ := db.Facts(context.Background(), store.FactFilter{Status: []string{"active"}})
+	edited := before[0]
+	for _, f := range before {
+		if f.Text == "prefers short answers" {
+			edited = f
+		}
+	}
+	edited.Text = "prefers very short answers"
+	if _, err := db.UpdateFact(context.Background(), edited); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := importMemoryFacts(context.Background(), db, dir); err != nil || n != 0 {
+		t.Fatalf("import after edit: %d, %v", n, err)
+	}
+	after, _ := db.Facts(context.Background(), store.FactFilter{Status: []string{"active"}})
+	if len(after) != 3 {
+		t.Fatalf("edited import changed the fact count: %+v", after)
+	}
+	for _, f := range after {
+		if f.Text == "prefers short answers" {
+			t.Fatalf("old text came back after edit: %+v", after)
+		}
+	}
 	// A missing directory is not an error (fresh checkout without memory/).
 	if n, err := importMemoryFacts(context.Background(), db, filepath.Join(dir, "nope")); err != nil || n != 0 {
 		t.Fatalf("missing dir: %d, %v", n, err)

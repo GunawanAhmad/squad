@@ -282,3 +282,25 @@ func TestSetMessageEmbeddingSkipsForgotten(t *testing.T) {
 		t.Fatalf("forgotten message got an embedding: %d, %v", n, err)
 	}
 }
+
+func TestApplyFactOpsKeepsSourceMessage(t *testing.T) {
+	s := storetest.New(t)
+	ctx := context.Background()
+	if _, err := s.CreateConversation(ctx, store.Conversation{ID: "daily:2026-11-01", CharacterID: "assistant"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.AddMessage(ctx, store.Message{ConversationID: "daily:2026-11-01", Role: "user", Content: "my sister is Ana"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := day(2026, 11, 1)
+	if _, err := s.ApplyFactOps(ctx, day, []store.FactOp{{
+		Op: "ADD", Text: "my sister is Ana", Category: "person", Core: false, SourceMessageID: &m.ID,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	facts, _ := s.Facts(ctx, store.FactFilter{Status: []string{"active"}})
+	if len(facts) != 1 || facts[0].SourceMessageID == nil || *facts[0].SourceMessageID != m.ID {
+		t.Fatalf("source lost: %+v", facts)
+	}
+}

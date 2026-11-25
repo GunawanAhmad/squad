@@ -471,11 +471,12 @@ func (s *Store) ImportFacts(ctx context.Context, facts []Fact) (int, error) {
 // FactOp is one validated change from the day-close job. ApplyFactOps applies
 // them in one transaction; a rejected item never reaches this method.
 type FactOp struct {
-	Op       string // ADD | SUPERSEDE | NONE
-	ID       int64  // SUPERSEDE: the active fact being replaced
-	Text     string
-	Category string
-	Core     bool
+	Op              string // ADD | SUPERSEDE | NONE
+	ID              int64  // SUPERSEDE: the active fact being replaced
+	Text            string
+	Category        string
+	Core            bool
+	SourceMessageID *int64 // the message the day-close job extracted it from
 }
 
 // ApplyFactOps writes a day's extracted facts atomically. SUPERSEDE inserts the
@@ -496,9 +497,9 @@ func (s *Store) ApplyFactOps(ctx context.Context, day time.Time, ops []FactOp) (
 		switch op.Op {
 		case "ADD":
 			_, err := tx.Exec(ctx, `
-				INSERT INTO facts (text, category, core, source_kind, valid_from)
-				VALUES ($1, $2, $3, 'extraction', $4)`,
-				strings.TrimSpace(op.Text), category, op.Core, Day(day))
+				INSERT INTO facts (text, category, core, source_kind, valid_from, source_message_id)
+				VALUES ($1, $2, $3, 'extraction', $4, $5)`,
+				strings.TrimSpace(op.Text), category, op.Core, Day(day), op.SourceMessageID)
 			if err != nil {
 				return applied, err
 			}
@@ -506,10 +507,10 @@ func (s *Store) ApplyFactOps(ctx context.Context, day time.Time, ops []FactOp) (
 		case "SUPERSEDE":
 			var newID int64
 			err := tx.QueryRow(ctx, `
-				INSERT INTO facts (text, category, core, source_kind, valid_from)
-				VALUES ($1, $2, $3, 'extraction', $4)
+				INSERT INTO facts (text, category, core, source_kind, valid_from, source_message_id)
+				VALUES ($1, $2, $3, 'extraction', $4, $5)
 				RETURNING id`,
-				strings.TrimSpace(op.Text), category, op.Core, Day(day)).Scan(&newID)
+				strings.TrimSpace(op.Text), category, op.Core, Day(day), op.SourceMessageID).Scan(&newID)
 			if err != nil {
 				return applied, err
 			}

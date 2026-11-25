@@ -146,7 +146,8 @@ func (e *Engine) closeDay(ctx context.Context, day time.Time, set Settings) {
 		return
 	}
 
-	runCtx, _ := json.Marshal(map[string]any{"day": store.DayString(day), "messages": len(msgs), "facts": len(facts)})
+	prompt, truncated := closePrompt(day, set, msgs, facts)
+	runCtx, _ := json.Marshal(map[string]any{"day": store.DayString(day), "messages": len(msgs), "facts": len(facts), "truncated": truncated})
 	runID, err := e.Store.StartRun(ctx, store.Run{Kind: "close", Model: modelID, Context: runCtx, Status: StatusRunning})
 	if err != nil {
 		log.Printf("close %s: starting run: %v", store.DayString(day), err)
@@ -165,8 +166,8 @@ func (e *Engine) closeDay(ctx context.Context, day time.Time, set Settings) {
 	raw, usage, err := CallStructured(ctx, StructuredSpec{
 		Model: model, ModelID: modelID, Session: "day-close",
 		System: "You extract durable facts about the user from their conversations. You never give advice and never invent anything.",
-		Prompt: closePrompt(day, set, msgs, facts),
-		Schema: `{"facts":[{"op":"ADD|SUPERSEDE|NONE","id":0,"text":"...","category":"preference|person|circumstance|goal|work|health|general","core":false}]}`,
+		Prompt: prompt,
+		Schema: `{"facts":[{"op":"ADD|SUPERSEDE|NONE","id":0,"text":"...","category":"preference|person|circumstance|goal|work|health|general","core":false,"source_message_id":0}]}`,
 	})
 	if err != nil {
 		log.Printf("close %s: %v", store.DayString(day), err)
@@ -175,7 +176,7 @@ func (e *Engine) closeDay(ctx context.Context, day time.Time, set Settings) {
 		return
 	}
 
-	ops, rejects := validateCloseDoc(raw, facts)
+	ops, rejects := validateCloseDoc(raw, facts, msgs)
 	if len(rejects) > 0 {
 		e.recordRejects(ctx, runID, map[string]any{
 			"day": store.DayString(day), "rejected": rejects, "applied": len(ops),
@@ -221,10 +222,12 @@ const closeSystemRules = `Rules:
 - Not tasks, not what happened that day ("went to the gym"), not the assistant's words.
 - If a new fact contradicts an existing one, SUPERSEDE that fact's id. Otherwise ADD.
 - If nothing durable was said, return {"facts":[]}. Never invent or generalize.
-- text: one short sentence, at most 300 characters.`
+- text: one short sentence, at most 300 characters.
+- source_message_id: the #id of the message this fact came from, copied from the message lines; omit it if unclear.`
 
-func closePrompt(day time.Time, set Settings, msgs []store.DayMessage, facts []store.Fact) string {
+func closePrompt(day time.Time, set Settings, msgs []store.DayMessage, facts []store.Fact) (string, bool) {
 	var b strings.Builder
+	truncated := false
 	fmt.Fprintf(&b, "Close the day %s (%s).\n\n", store.DayString(day), day.Format("Monday"))
 	if len(facts) > 0 {
 		b.WriteString("Existing active facts:\n")
@@ -238,35 +241,41 @@ func closePrompt(day time.Time, set Settings, msgs []store.DayMessage, facts []s
 	for i, m := range msgs {
 		if i == maxCloseMessages || used > 12000 {
 			fmt.Fprintf(&b, "- (%d more messages)\n", len(msgs)-i)
+			truncated = true
 			break
 		}
 		who := m.CharacterID
 		if m.Role == "user" {
 			who = "user"
 		}
-		line := fmt.Sprintf("- [%s] %s: %s\n", m.CreatedAt.In(set.Loc).Format("15:04"), who, clip(m.Content, 700))
+		line := fmt.Sprintf("- [#%d] [%s] %s: %s\n", m.ID, m.CreatedAt.In(set.Loc).Format("15:04"), who, clip(m.Content, 700))
 		b.WriteString(line)
 		used += len(line)
 	}
 	b.WriteString("\n")
 	b.WriteString(closeSystemRules)
-	return b.String()
+	return b.String(), truncated
 }
 
 // validateCloseDoc checks every item; only clean items become store ops.
-func validateCloseDoc(raw json.RawMessage, existing []store.Fact) ([]store.FactOp, []string) {
+func validateCloseDoc(raw json.RawMessage, existing []store.Fact, msgs []store.DayMessage) ([]store.FactOp, []string) {
 	var doc struct {
 		Facts []struct {
-			Op       string `json:"op"`
-			ID       int64  `json:"id"`
-			Text     string `json:"text"`
-			Category string `json:"category"`
-			Core     bool   `json:"core"`
+			Op              string `json:"op"`
+			ID              int64  `json:"id"`
+			Text            string `json:"text"`
+			Category        string `json:"category"`
+			Core            bool   `json:"core"`
+			SourceMessageID *int64 `json:"source_message_id"`
 		} `json:"facts"`
 	}
 	var rejects []string
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, []string{"document: " + err.Error()}
+	}
+	validSource := map[int64]bool{}
+	for _, m := range msgs {
+		validSource[m.ID] = true
 	}
 	byID := map[int64]store.Fact{}
 	byText := map[string]bool{}
@@ -309,7 +318,14 @@ func validateCloseDoc(raw json.RawMessage, existing []store.Fact) ([]store.FactO
 				continue
 			}
 		}
-		ops = append(ops, store.FactOp{Op: op, ID: item.ID, Text: text, Category: category, Core: item.Core})
+		if item.SourceMessageID != nil && *item.SourceMessageID <= 0 {
+			item.SourceMessageID = nil
+		}
+		if item.SourceMessageID != nil && !validSource[*item.SourceMessageID] {
+			rejects = append(rejects, fmt.Sprintf("item %d: source_message_id %d is not from this day", i, *item.SourceMessageID))
+			continue
+		}
+		ops = append(ops, store.FactOp{Op: op, ID: item.ID, Text: text, Category: category, Core: item.Core, SourceMessageID: item.SourceMessageID})
 		byText[strings.ToLower(text)] = true
 		if op == "SUPERSEDE" {
 			delete(byID, item.ID) // a second supersede of the same row is invalid
@@ -434,6 +450,19 @@ func (e *Engine) maybeSummarize(ctx context.Context, set Settings) {
 		msg := fmt.Sprintf("summary rejected: %d characters", len(summary))
 		_ = e.Store.FinishRun(context.WithoutCancel(ctx), runID, StatusError, msg, in, out)
 		return
+	}
+	// A message may have been forgotten while the model was running. Never
+	// store a summary that quotes something the user just deleted.
+	nowMsgs, err := e.Store.Messages(ctx, convID, 0, 0)
+	if err != nil {
+		_ = e.Store.FinishRun(context.WithoutCancel(ctx), runID, StatusError, err.Error(), in, out)
+		return
+	}
+	for _, m := range nowMsgs {
+		if m.ID >= older[0].ID && m.ID <= lastID && m.ForgottenAt != nil {
+			_ = e.Store.FinishRun(context.WithoutCancel(ctx), runID, StatusError, "messages forgotten during summary", in, out)
+			return
+		}
 	}
 	if err := e.Store.SetSummary(ctx, convID, summary, lastID); err != nil {
 		_ = e.Store.FinishRun(context.WithoutCancel(ctx), runID, StatusError, err.Error(), in, out)

@@ -91,6 +91,15 @@ func main() {
 		log.Printf("memory: imported %d facts from %s", n, memDir)
 	}
 
+	// Semantic search (M-10): opt-in until the keyword-vs-hybrid comparison
+	// is recorded. With EMBEDDINGS_URL unset, search is keyword-only and no
+	// worker runs. If Ollama is down, embeddings wait and search still works.
+	var embedder llm.Embedder
+	if url := os.Getenv("EMBEDDINGS_URL"); url != "" {
+		embedder = llm.NewOpenAIEmbeddings(url, "ollama", envOr("EMBEDDINGS_MODEL", "bge-m3"), 1024)
+		go (&assistant.EmbedWorker{Store: db, Embedder: embedder}).Run(context.Background())
+	}
+
 	backup := newDailyBackup(backupDir)
 	runner := assistant.New(assistant.Config{
 		Store: db,
@@ -99,7 +108,8 @@ func main() {
 			string(llm.OpenCodeProvider): openCodeModel(),
 			string(llm.ClaudeProvider):   claudeModel(),
 		},
-		DB: db,
+		DB:       db,
+		Embedder: embedder,
 		Memory: func(charID string) string {
 			if c, ok := chars[charID]; ok && c.Context == "none" {
 				return ""
@@ -123,16 +133,6 @@ func main() {
 		Location:   assistant.TimeZone(),
 		BeforeTurn: func(ctx context.Context) { backup.Maybe(ctx, assistant.Now()) },
 	})
-
-	// Semantic search (M-10): local Ollama, OpenAI-compatible. If it is not
-	// running, embeddings wait and every search stays keyword-only.
-	embedder := llm.NewOpenAIEmbeddings(
-		envOr("EMBEDDINGS_URL", "http://127.0.0.1:11434/v1"),
-		"ollama",
-		envOr("EMBEDDINGS_MODEL", "bge-m3"),
-		1024,
-	)
-	go (&assistant.EmbedWorker{Store: db, Embedder: embedder}).Run(context.Background())
 
 	var engine *assistant.Engine
 	if c, ok := chars[assistantCharacterID]; ok {

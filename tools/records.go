@@ -566,7 +566,8 @@ func (op UndoOp) target() (string, int64) {
 func removeOp(ops []UndoOp, op UndoOp) []UndoOp {
 	for i, o := range ops {
 		if o.Op == op.Op && o.TaskID == op.TaskID && o.ActivityID == op.ActivityID &&
-			o.ReminderID == op.ReminderID && o.CheckinDay == op.CheckinDay && o.CheckinKind == op.CheckinKind {
+			o.ReminderID == op.ReminderID && o.FactID == op.FactID &&
+			o.CheckinDay == op.CheckinDay && o.CheckinKind == op.CheckinKind {
 			return append(append([]UndoOp(nil), ops[:i]...), ops[i+1:]...)
 		}
 	}
