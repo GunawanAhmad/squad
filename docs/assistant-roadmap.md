@@ -569,3 +569,21 @@ The visible tool failures include one run of "I dropped the newsletter idea" wit
 The assistant persona is now 3,686 characters. Its section budget was raised from 3,000 to 4,000 during this phase: the old cap silently truncated the D3 web rules, which the Phase 3 additions pushed past the limit. A test now fails if the assistant persona no longer fits.
 
 Phase 2 open items are unchanged: hybrid search is off unless `EMBEDDINGS_URL` is set, the keyword/hybrid comparison is still pending, and cross-language recall remains below its bar.
+
+## Per-agent memory (2026-11-25)
+
+Every character now has its own memory: facts carry `character_id`, every fact/message read and search (keyword and vector) takes an owner, and the day-close job runs once per `(day, character)`. Only `profile.md` is shared. The independent review (Claude, two axes) found one P2 — `context: "none"` characters were still mined by the day-close job — fixed in `ef746eb`; its re-check found no blockers.
+
+**Verified deterministically** (fake model, throwaway schemas; `go vet $(go list ./... | grep -v node_modules)` clean, `go test -count=1 $(go list ./... | grep -v node_modules)` passes, store tests ran against the Compose Postgres and did not skip):
+
+- A fact told to Ria is absent from the assistant's and Socrates's prompt, core facts, pre-retrieval, `recall` (keyword and vector), `forget` resolution and evening "I noted"; the leak rows were given identical embeddings so a missing owner filter would have surfaced them (`assistant/isolation_test.go`, `store/isolation_test.go`).
+- A day with messages from two characters closes each owner separately; facts land on the right owner. A forged cross-owner SUPERSEDE id and a source message id from the other character are rejected and recorded in the close run's context. One character's model failure retries alone on the next poll without re-applying the other's facts (`assistant/jobs_test.go`).
+- The D3 guard refuses `remember`/`forget` after a web read for a persona while `recall` still works (`TestPersonaRefusesMemoryWritesAfterWebRead`); persona config validation allows memory tools and web tools but rejects daily-domain tools.
+- `context: "none"` disables the prompt block, pre-retrieval and close-job extraction; unknown characters are not given new facts.
+- The Memory screen API requires an explicit `?character=` on every endpoint; facts, search, edit, history, forget and forget-day act on that owner, and cross-owner edits/forgets return 404 (`handlers_memory_test.go`). `make web` and `make lint` pass.
+
+**Database rebuilt from empty on 2026-11-25.** The pre-rebuild dump is `backups/pre-rebuild-2026-11-25.dump` (144,490 bytes, `pg_dump -Fc`, mode 0600). The `characters` database was dropped and recreated through `docker compose exec postgres psql` (not `down -v`); the app then started on it with all four migrations applied (`schema_version = 4`, all app tables present). `legacy_facts_imported = 1`: the import ran, and since the only `memory/*.json` file contains no facts, it imported 0 rows; any legacy note would belong to `assistant`. `/api/characters` answered 200. The app was stopped after the check; `make dev` starts it.
+
+**Claude CLI route:** personas on it cannot call app tools, so they do not use `remember`/`forget`/`recall` there. They still get their own core facts and pre-retrieval in the prompt (the memory block does not depend on the provider), and the day-close job still learns from their chats, because it reads stored messages rather than tool calls. No MCP bridge was built.
+
+Not run: a live model turn on either route and a memory-eval re-run (both optional and spend API credit). Persona memory was verified through the deterministic tool/turn tests, not a live model.
