@@ -119,19 +119,24 @@ sequenceDiagram
 
 ### 2.2 Memory: "remember everything" made concrete
 
-Not everything fits in a prompt. So "remember everything" means **everything is stored, nothing is deleted without you, the important parts are always in front of the model, and the rest can be found.**
+**Every agent has its own memory.** What you tell Ria, only Ria knows; the assistant and Socrates do not, unless you tell them too. The model is the real world: what you tell one person is not known by another. Messages are already owned by `conversations.character_id`, and every fact carries its `character_id`. Isolation is enforced in the store (every fact and message read/search takes a character id; there is no "all characters" mode), not in a prompt. Only the Memory screen's REST endpoints cross agents, and they take an explicit `character`.
+
+`profile.md` stays shared: you write it, and every agent sees that text. It is the user's own file, not something an agent learned.
+
+Not everything fits in a prompt. So "remember everything" means **everything is stored, nothing is deleted without you, the important parts are always in front of the model that was told, and the rest can be found.**
 
 | Layer | What | Stored as | Written by | In context |
 |---|---|---|---|---|
-| **Raw record** | Every message, every tool call | `messages`, `tool_calls` | Turn runner, automatically | Today's thread (rolling summary if long) |
+| **Raw record** | Every message, every tool call | `messages`, `tool_calls` (owner via `conversations.character_id`) | Turn runner, automatically | The agent's own thread (rolling summary if long) |
 | **What you do** | Plans and what happened | `tasks`, `activities`, `reminders` | Tools, during chat | Today's plans, done items, due reminders |
-| **What's true about you** | Preferences, people, circumstances, goals | `profile.md` (you write it), `facts` | You; the `remember` tool; the day close job | Core facts always; the rest by search |
-| **Recent days** | What happened each day | Nothing extra: built from `activities` + `tasks` on the fly | – | The last 7 days, as a digest from records |
-| **Search** | Find anything above, by words *and* by meaning (across Indonesian/English) | `tsvector` + GIN indexes; `embedding` columns (pgvector) | Automatic (embeddings by a background worker) | Top hits for your message, plus a `recall` tool |
+| **What's true about you** | Preferences, people, circumstances, goals | `profile.md` (you write it, shared), `facts.character_id` (one owner each) | You; each agent's own `remember` tool; the day close job for that agent | That agent's core facts always; its own facts by search |
+| **Recent days** | What happened each day | Nothing extra: built from `activities` + `tasks` on the fly | – | The last 7 days, as a digest from records (assistant only) |
+| **Search** | Find anything above, by words *and* by meaning (across Indonesian/English) | `tsvector` + GIN indexes; `embedding` columns (pgvector); both filtered by owner | Automatic (embeddings by a background worker) | The agent's own top hits for your message, plus its `recall` tool |
 
-- **Facts are superseded, not overwritten.** "I live in Bali" → "I moved to Jakarta" marks the old fact `superseded` with an end date. "Where did I live last year?" still works, and a wrong update can be reverted. Only you can hard-delete ("forget that").
-- **Every fact keeps its source** (you, the tool, or extraction, plus the message id). The Memory screen shows "from: chat on 3 Dec".
-- **Extracted facts are applied, but always shown.** The day close job adds what it learned directly, and the evening check-in lists it ("I noted: …"). You correct it in chat or on the Memory screen. Web content can't write memory in the turn it was read (D3's guard), and anything the close job extracts is listed for you. If the extraction turns out sloppy (high correction rate, §7), switch to propose-then-confirm.
+- **Facts are superseded, not overwritten.** "I live in Bali" → "I moved to Jakarta" marks the old fact `superseded` with an end date. "Where did I live last year?" still works, and a wrong update can be reverted. Only you can hard-delete ("forget that"). A fact can only supersede a fact with the same owner, and `forget` resolves only the calling agent's facts.
+- **Every character with memory gets the full stack, scoped to itself:** `profile.md`, its own core facts, pre-retrieval over its own messages and facts, and `remember` / `forget` / `recall`. Daily records (tasks, activities, reminders, check-ins) stay assistant-only. The `context` setting is `"memory"` (default) or `"none"`.
+- **Every fact keeps its source** (you, the tool, or extraction, plus the message id). The Memory screen shows "from: chat on 3 Dec" and a character selector: facts, search, edit, history, forget and forget-day act on the selected agent.
+- **Extracted facts are applied, but always shown.** The day close job runs once per (day, character), sees only that character's messages and facts, and adds what it learned to that owner. The assistant's evening check-in lists only its own new facts ("I noted: …"). You correct it in chat or on the Memory screen. Web content can't write memory in the turn it was read (D3's guard), and anything the close job extracts is listed for you. If the extraction turns out sloppy (high correction rate, §7), switch to propose-then-confirm.
 - **The model is told to search before saying "I don't know"** about the past. The eval checks that it actually does (§7).
 
 ---
@@ -148,7 +153,7 @@ Not everything fits in a prompt. So "remember everything" means **everything is 
 | D6 | Recommendations | **Only when asked**: a persona rule, plus check-in instructions that only allow questions and reflecting back. When asked, the model calls `get_overview` and cites the items it found. | "Yesterday you planned X" is a reminder of your own words. "You should do X" is advice, and the eval checks for it. |
 | D7 | Retrieval | **Hybrid:** Postgres full-text (`simple` config) + pgvector cosine, merged with reciprocal rank fusion and a recency boost, in one SQL query. Embeddings from **local Ollama** running the open-weight **`bge-m3`** (multilingual, 1024 dims, 8k context) through its OpenAI-compatible `/v1/embeddings`, so the existing `openai-go` client works with a different base URL. Runs in the Compose stack as a CPU container (`ollama/ollama`, port published to `127.0.0.1:11434`, named model volume), because the target is a VPS without a GPU; no `nvidia-container-toolkit`, no systemd unit. The app uses it only when `EMBEDDINGS_URL` is set (opt-in until the comparison is recorded); otherwise search stays keyword-only. CPU is slower than the RTX 3050 this started on, so M-10 measures texts/s and query latency on the VPS and the ~1 s query timeout is revisited if a short query exceeds it. Built keyword-first; vectors added as the last Phase 2 step, measured against the keyword baseline. | bge-m3 is multilingual, free to run, keeps your text on your own server, and its 1024 dims are small enough to store and scan cheaply. Alternatives: `qwen3-embedding` (0.6B, also open-weight) locally, or `baai/bge-m3` via OpenRouter (~$0.01 per million tokens) if the PC setup becomes a burden. Don't mix sources for one model: vectors can differ slightly. Changing the model later means re-embedding everything; `embedding_model` records which model made each vector. |
 | D8 | Agent topology | One assistant loop + one background job type. No multi-agent setup. | About 12 tools fits easily in one agent. |
-| D9 | Privacy | Your log and facts go to the OpenCode gateway's upstream model. Embeddings are computed locally and never leave your machine. Personas get `context: "profile"` at most (a new per-character setting). | A conscious choice rather than today's default of sending everything to everyone. |
+| D9 | Privacy is isolation between agents | Your log and facts go to the OpenCode gateway's upstream model. Embeddings are computed locally and never leave your machine. **Memory is per agent:** each fact and message read takes a `character_id`, and no agent can read another's facts or messages. Personas get the full memory stack scoped to themselves, including `remember` / `forget` / `recall`; only the user-written `profile.md` is shared. | The real-world model: what you tell one person is not known by another. Isolation lives in the store, so a prompt mistake cannot leak it. Shared memory between agents is parked (§9) as an explicit future opt-in. |
 | D10 | Code structure | Split out of `package main` only where a seam is needed: `store`, `llm`, `tools`, `assistant` | Fakes go in at the seams; more layers would be ceremony. |
 
 ---
@@ -237,18 +242,21 @@ CREATE TABLE reminders (
 CREATE TABLE checkins (                     -- also records which days are closed
   day date NOT NULL,
   kind text NOT NULL,                        -- morning | evening | close (day-close job, Phase 2)
+  character_id text NOT NULL,                -- the close job claims one (day, character) at a time
   status text NOT NULL,                      -- pending | sent | failed | skipped  ('sent' = done, for close)
   attempts int NOT NULL DEFAULT 0,
   message_id bigint REFERENCES messages(id), run_id bigint REFERENCES runs(id),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (day, kind)                    -- idempotency: two tabs polling can't double-send
+  PRIMARY KEY (day, kind, character_id)      -- idempotency: two tabs can't double-send; a failed
+                                             -- character retries alone without re-applying the others
 );
 CREATE TABLE settings (key text PRIMARY KEY, value text NOT NULL);
   -- tz (default from TZ env, else Asia/Makassar), day_starts_at '04:00', morning_at, evening_at, jobs_model
 
--- Phase 2: memory
+-- Phase 2: memory. Facts are per agent: character_id is the agent that was told.
 CREATE TABLE facts (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  character_id text NOT NULL,
   text text NOT NULL CHECK (length(text) <= 300),
   category text NOT NULL DEFAULT 'general',  -- preference | person | circumstance | goal | work | health | general
   core boolean NOT NULL DEFAULT false,       -- always in context
@@ -262,6 +270,7 @@ CREATE TABLE facts (
   search tsvector GENERATED ALWAYS AS (to_tsvector('simple', text)) STORED
 );
 CREATE INDEX facts_search ON facts USING gin (search);
+CREATE INDEX facts_active ON facts (character_id, status, core);
 
 -- Phase 2, last step: semantic search (M-10)
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -274,7 +283,7 @@ ALTER TABLE facts    ADD COLUMN embedding vector(1024), ADD COLUMN embedding_mod
 
 **Rule of thumb:** anything you'd ask "how many / how long / which / what's left" about is a row (tasks, activities, reminders). Everything else is a fact or stays in the raw messages, which are searchable.
 
-**Migration from today:** `profile.md` stays a file you edit. `memory/<char>.json` facts are imported as `active, source_kind='user'`. Existing localStorage chats are imported once by the frontend.
+**Migration from today:** `profile.md` stays a file you edit. `memory/<char>.json` facts are imported once as the **assistant's** facts (`active, source_kind='user'`); personas never had their own files and do not inherit them. Existing localStorage chats are imported once by the frontend. Facts added in a fresh per-agent database start empty; the rebuild was from an empty database, with no backfill (2026-11-25).
 
 **Left out on purpose:** goals as a table (they're facts with `category='goal'` until you need progress tracking), people as a table (facts with `category='person'`), subtasks, priorities, recurring tasks (recurring *reminders* cover "every day…").
 
@@ -418,9 +427,9 @@ One ticket ≈ one PR. ✱ = ships with a test.
 | ID | Ticket | Size | Depends |
 |---|---|---|---|
 | M-1 | Migration: facts with full-text index; import `memory/*.json`; core facts render from the DB. ✱ | M | F-4 |
-| M-2 | Tools `remember`, `forget` (also hides the source message after you confirm), `recall` (full-text across all conversations and facts, date filters, excludes forgotten). ✱ | M | M-1 |
+| M-2 | Tools `remember`, `forget` (also hides the source message after you confirm), `recall` (full-text inside the calling character's conversations and facts, date filters, excludes forgotten). Every character with memory gets them, scoped to itself. ✱ | M | M-1 |
 | M-3 | Structured-output helper: schema → Go struct → validate → log rejects. ✱ | S | F-5 |
-| M-4 | Day close job, run from `Due()` for unclosed past days (`checkins` kind `close`), over all that day's conversations, on `jobs_model`; fact ADD/SUPERSEDE; failure retries without blocking the check-in; "I noted: …" in the evening check-in. ✱ (fake model) | L | M-1..M-3, L-8 |
+| M-4 | Day close job, run from `Due()` once per unclosed (day, character) (`checkins` kind `close`), giving each call only that character's messages and current facts, on `jobs_model`; validated ADD/SUPERSEDE; one character's failure retries alone; "I noted: …" in the evening check-in lists the assistant's own facts. ✱ (fake model) | L | M-1..M-3, L-8 |
 | M-5 | Rolling summary of today's thread past the window. ✱ | M | M-3 |
 | M-6 | Pre-retrieval with ranking + dedupe; update `last_used_at`/`use_count`; `runs.context` ids. ✱ | M | M-1 |
 | M-7 | Context v2 with section budgets + truncation logging. ✱ | M | M-4..M-6 |
@@ -439,7 +448,7 @@ One ticket ≈ one PR. ✱ = ships with a test.
 
 ## 7. Testing & evaluation
 
-**Deterministic (`go test ./...`, every commit):** the loop with the fake model; store and migrations on a throwaway Postgres schema; tool validation tables (bad dates, past reminder times, unknown ids, ambiguity); undo round-trips; `Due()` with a fake clock (times, skipping, repeating reminders, concurrent polls); context builder golden files; SSRF tests (existing).
+**Deterministic (`go test ./...`, every commit):** the loop with the fake model; store and migrations on a throwaway Postgres schema; per-agent isolation (a fact told to Ria never reaches the assistant's or Socrates's prompt, core facts, pre-retrieval, `recall`, `forget` or "I noted"; a forged cross-owner SUPERSEDE/source id is rejected; one character's close failure retries alone); the D3 web guard for a persona; tool validation tables (bad dates, past reminder times, unknown ids, ambiguity); undo round-trips; `Due()` with a fake clock (times, skipping, repeating reminders, concurrent polls); context builder golden files; SSRF tests (existing).
 
 **Model evals (`make eval`, before changing model or prompts; 3 runs per scenario, report the pass rate):**
 
@@ -478,6 +487,7 @@ One ticket ≈ one PR. ✱ = ships with a test.
 | Calendar, email, other integrations | After M3, if you want plans to account for meetings |
 | Proactive advice / signals engine | You ask for it explicitly |
 | Goals and people as tables | You want progress tracking per goal, or facts about people get messy |
+| Shared memory between agents | You ask for it. Then facts get an explicit `shared` marker (or a shared owner) and a deliberate read path; isolation stays the default |
 | Multi-agent setup | Tool count > ~20 *and* the eval shows wrong tool choices |
 | Web tools for the assistant | You want it to look things up; then memory writes after web content must become proposals |
 
