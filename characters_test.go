@@ -37,11 +37,6 @@ func TestCharactersConfigIsValid(t *testing.T) {
 	if assistant == nil {
 		t.Fatal("no assistant character")
 	}
-	for _, tool := range assistant.Tools {
-		if tool == "web_search" || tool == "fetch_url" {
-			t.Fatalf("assistant has a web tool: %s", tool)
-		}
-	}
 	for _, c := range list {
 		if c.ID != assistantCharacterID && len(c.Tools) == 0 {
 			t.Fatalf("%s has no tools", c.ID)
@@ -61,7 +56,6 @@ func TestCharactersConfigRejectsBadTools(t *testing.T) {
 	}
 
 	cases := map[string]func([]Character){
-		"assistant web tool":  func(l []Character) { l[0].Tools = append(l[0].Tools, "web_search") },
 		"persona domain tool": func(l []Character) { l[1].Tools = append(l[1].Tools, "plan_tasks") },
 		"unknown tool":        func(l []Character) { l[1].Tools = []string{"nope"} },
 		"bad context":         func(l []Character) { l[1].Context = "everything" },

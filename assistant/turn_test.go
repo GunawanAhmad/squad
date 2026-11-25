@@ -429,3 +429,49 @@ func TestOnlyTheAssistantGetsDailyRecords(t *testing.T) {
 		t.Fatalf("assistant context missing today section:\n%s", reqs[1].System)
 	}
 }
+
+// D3: after a web tool ran in a turn, remember/forget are refused for the rest of it.
+func TestTurnRefusesMemoryWritesAfterWebRead(t *testing.T) {
+	st := newFakeStore()
+	ran := map[string]int{}
+	reg := tools.New()
+	for _, name := range []string{"web_search", "remember", "forget"} {
+		name := name
+		reg.Add(&tools.Tool{
+			Name: name, Description: name, Parameters: map[string]any{"type": "object"},
+			Run: func(context.Context, tools.Env, string) (tools.Result, error) {
+				ran[name]++
+				return tools.Result{Text: "ok"}, nil
+			},
+		})
+	}
+	fake := llm.NewFake(
+		llm.FakeStep{ToolCalls: []llm.ToolCall{{ID: "a", Name: "remember", Arguments: `{}`}}},
+		llm.FakeStep{ToolCalls: []llm.ToolCall{{ID: "b", Name: "web_search", Arguments: `{}`}}},
+		llm.FakeStep{ToolCalls: []llm.ToolCall{
+			{ID: "c", Name: "remember", Arguments: `{}`},
+			{ID: "d", Name: "forget", Arguments: `{}`},
+		}},
+		llm.FakeStep{Text: "done"},
+	)
+	r := New(Config{
+		Store: st, Tools: reg,
+		Models:   map[string]llm.Model{string(llm.OpenCodeProvider): fake},
+		Memory:   func(string) string { return "" },
+		Now:      func() time.Time { return testNow },
+		Location: testLoc, Window: 40, MaxSteps: 10,
+	})
+	char := testChar
+	char.Tools = []string{"web_search", "remember", "forget"}
+	emit, _ := collectEvents()
+	if _, err := r.Turn(context.Background(), TurnRequest{ConversationID: "c1", Character: char, Input: "go"}, emit); err != nil {
+		t.Fatal(err)
+	}
+	if ran["remember"] != 1 || ran["forget"] != 0 || ran["web_search"] != 1 {
+		t.Fatalf("ran: %v", ran)
+	}
+	calls := st.toolCalls()
+	if len(calls) != 4 || calls[2].Status != "error" || !strings.Contains(calls[2].Result, "refused") || calls[3].Status != "error" {
+		t.Fatalf("tool calls: %+v", calls)
+	}
+}

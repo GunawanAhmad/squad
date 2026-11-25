@@ -41,9 +41,9 @@ type Character struct {
 // The assistant is the one character with daily threads and domain tools.
 const assistantCharacterID = "assistant"
 
-// webTools are the only tools that read the outside world. D3: the assistant
-// gets none of them (no page content can plant memories), and the personas get
-// only these (they must not write the user's day).
+// webTools are the only tools that read the outside world. The personas get
+// only these (they must not write the user's day). The assistant may use them
+// too; its turn loop refuses memory writes after a web read (D3).
 var webTools = []string{"web_search", "fetch_url"}
 
 var sessionIDRe = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
@@ -151,7 +151,7 @@ func main() {
 }
 
 // validateCharacters keeps the config honest at startup: known tools, the
-// assistant's no-web-tools rule (D3), personas that cannot write the user's day,
+// personas that cannot write the user's day,
 // a valid context setting, and a picker that includes the default model.
 func validateCharacters(list []Character, reg *tools.Registry) error {
 	seen := map[string]bool{}
@@ -166,9 +166,6 @@ func validateCharacters(list []Character, reg *tools.Registry) error {
 		for _, t := range c.Tools {
 			if !reg.Has(t) {
 				return fmt.Errorf("character %q: unknown tool %q", c.ID, t)
-			}
-			if c.ID == assistantCharacterID && slices.Contains(webTools, t) {
-				return fmt.Errorf("character %q: the assistant must not have web tool %q (D3)", c.ID, t)
 			}
 			if c.ID != assistantCharacterID && !slices.Contains(webTools, t) {
 				return fmt.Errorf("character %q: personas get no domain tool %q", c.ID, t)

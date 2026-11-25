@@ -264,6 +264,7 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	}
 
 	var usage llm.Usage
+	webRead := false // a page or search result may carry planted instructions
 	for step := 0; step < r.maxSteps; step++ {
 		var partial strings.Builder
 		resp, err := model.Stream(ctx, llm.Request{
@@ -333,7 +334,17 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 			emit(Event{Type: "tool", Name: tc.Name, Args: tc.Arguments, ID: call.ID})
 
 			env.ToolCallID = call.ID
-			res, toolErr := r.tools.Run(ctx, env, tc.Name, tc.Arguments)
+			var res tools.Result
+			var toolErr error
+			if webRead && (tc.Name == "remember" || tc.Name == "forget") {
+				// D3: web content must never reach memory directly. The user can say it in their next message.
+				toolErr = errors.New("refused: memory can't change in the same turn as reading the web; ask the user to confirm it in their own message")
+			} else {
+				res, toolErr = r.tools.Run(ctx, env, tc.Name, tc.Arguments)
+			}
+			if tc.Name == "web_search" || tc.Name == "fetch_url" {
+				webRead = true
+			}
 			status, out := "ok", res.Text
 			var undo []byte
 			if toolErr != nil {
