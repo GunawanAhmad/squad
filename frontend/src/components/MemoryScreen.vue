@@ -2,10 +2,14 @@
 import { onMounted, ref } from 'vue';
 import { play } from '../audio';
 import GameButton from './GameButton.vue';
-import type { Fact, MemoryHit } from '../types';
+import type { Character, Fact, MemoryHit } from '../types';
 
 const emit = defineEmits<{ back: [] }>();
 
+// Every agent has its own memory. Every request names the selected character;
+// the server refuses a request without one.
+const characters = ref<Character[]>([]);
+const character = ref('');
 const facts = ref<Fact[]>([]);
 const status = ref('active,superseded');
 const category = ref('');
@@ -28,16 +32,32 @@ async function api<T>(path: string, init?: Parameters<typeof fetch>[1]): Promise
   return (await res.json()) as T;
 }
 
+// scoped adds the selected character to a path that has no character yet.
+function scoped(path: string): string {
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}character=${encodeURIComponent(character.value)}`;
+}
+
 async function loadFacts() {
+  if (!character.value) return;
   try {
     const params = new URLSearchParams();
     if (status.value) params.set('status', status.value);
     if (category.value) params.set('category', category.value);
     if (query.value.trim()) params.set('q', query.value.trim());
-    facts.value = (await api<{ facts: Fact[] }>(`/api/memory/facts?${params}`)).facts;
+    facts.value = (await api<{ facts: Fact[] }>(scoped(`/api/memory/facts?${params}`))).facts;
   } catch (err) {
     notice.value = (err as Error).message;
   }
+}
+
+async function changeCharacter() {
+  history.value = null;
+  searchHits.value = [];
+  searchFacts.value = [];
+  notice.value = '';
+  play('lock');
+  await loadFacts();
 }
 
 async function loadProfile() {
@@ -45,7 +65,16 @@ async function loadProfile() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadFacts(), loadProfile()]);
+  await loadProfile();
+  try {
+    characters.value = await api<Character[]>('/api/characters');
+  } catch (err) {
+    notice.value = (err as Error).message;
+    return;
+  }
+  const preferred = characters.value.find((c) => c.id === 'assistant') ?? characters.value[0];
+  character.value = preferred?.id ?? '';
+  await loadFacts();
 });
 
 function back() {
@@ -62,7 +91,7 @@ async function editFact(f: Fact) {
 
 async function patchFact(f: Fact, body: Record<string, unknown>) {
   try {
-    await api(`/api/memory/facts/${f.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+    await api(scoped(`/api/memory/facts/${f.id}`), { method: 'PATCH', body: JSON.stringify(body) });
     play('lock');
   } catch (err) {
     notice.value = (err as Error).message;
@@ -76,7 +105,7 @@ async function toggleCore(f: Fact) {
 
 async function showHistory(f: Fact) {
   try {
-    const res = await api<{ history: Fact[] }>(`/api/memory/facts/${f.id}/history`);
+    const res = await api<{ history: Fact[] }>(scoped(`/api/memory/facts/${f.id}/history`));
     history.value = { id: f.id, facts: res.history };
   } catch (err) {
     notice.value = (err as Error).message;
@@ -86,7 +115,7 @@ async function showHistory(f: Fact) {
 async function forgetFact(f: Fact) {
   if (!confirm(`Forget "${f.text}"? The message it came from is hidden too.`)) return;
   try {
-    await api(`/api/memory/facts/${f.id}/forget`, { method: 'POST', body: JSON.stringify({ confirm: true }) });
+    await api(scoped(`/api/memory/facts/${f.id}/forget`), { method: 'POST', body: JSON.stringify({ confirm: true }) });
     if (history.value?.id === f.id) history.value = null;
     await loadFacts();
   } catch (err) {
@@ -109,7 +138,7 @@ async function search() {
   busy.value = true;
   try {
     const res = await api<{ messages: MemoryHit[]; facts: Fact[] }>(
-      `/api/memory/search?q=${encodeURIComponent(q)}&limit=20`,
+      scoped(`/api/memory/search?q=${encodeURIComponent(q)}&limit=20`),
     );
     searchHits.value = res.messages;
     searchFacts.value = res.facts;
@@ -123,7 +152,7 @@ async function search() {
 async function forgetMessage(m: MemoryHit) {
   if (!confirm(`Hide this message from search and context?\n\n${m.content}`)) return;
   try {
-    await api(`/api/memory/messages/${m.id}/forget`, { method: 'POST' });
+    await api(scoped(`/api/memory/messages/${m.id}/forget`), { method: 'POST' });
     searchHits.value = searchHits.value.filter((x) => x.id !== m.id);
   } catch (err) {
     notice.value = (err as Error).message;
@@ -132,9 +161,9 @@ async function forgetMessage(m: MemoryHit) {
 
 async function forgetWholeDay() {
   if (!forgetDay.value) return;
-  if (!confirm(`Forget every message on ${forgetDay.value}?`)) return;
+  if (!confirm(`Forget every message on ${forgetDay.value} in ${character.value}'s chats?`)) return;
   try {
-    const res = await api<{ forgotten: number }>(`/api/memory/days/${forgetDay.value}/forget`, { method: 'POST' });
+    const res = await api<{ forgotten: number }>(scoped(`/api/memory/days/${forgetDay.value}/forget`), { method: 'POST' });
     notice.value = `${res.forgotten} message${res.forgotten === 1 ? '' : 's'} hidden.`;
     searchHits.value = [];
   } catch (err) {
@@ -150,6 +179,22 @@ async function forgetWholeDay() {
   >
     <header class="memory-head">
       <h2>MEMORY</h2>
+      <div class="memory-scope">
+        <label for="memory-character">Whose memory</label>
+        <select
+          id="memory-character"
+          v-model="character"
+          @change="changeCharacter"
+        >
+          <option
+            v-for="c in characters"
+            :key="c.id"
+            :value="c.id"
+          >
+            {{ c.name }}
+          </option>
+        </select>
+      </div>
       <GameButton @click="back">
         ◀ Back
       </GameButton>
@@ -277,7 +322,7 @@ async function forgetWholeDay() {
       </section>
 
       <section class="memory-panel">
-        <h3>Search everything</h3>
+        <h3>Search this agent's chats</h3>
         <form
           class="filters"
           @submit.prevent="search"
@@ -285,7 +330,7 @@ async function forgetWholeDay() {
           <input
             v-model="searchQuery"
             type="search"
-            placeholder="Words from any conversation…"
+            placeholder="Words from this agent's conversations…"
           >
           <GameButton
             variant="primary"
@@ -336,7 +381,7 @@ async function forgetWholeDay() {
       <section class="memory-panel wide">
         <h3>Profile (memory/profile.md)</h3>
         <p class="muted">
-          Your own notes, always in context. Edit them here or in the file.
+          Your own notes, shared by every agent and always in context. Edit them here or in the file.
         </p>
         <textarea
           v-model="profile"
