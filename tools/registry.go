@@ -58,6 +58,7 @@ func New() *Registry {
 		webSearchTool(), fetchURLTool(),
 		planTasksTool(), updateTaskTool(), completeTaskTool(), listTasksTool(),
 		logActivityTool(), queryActivitiesTool(),
+		overviewTool(),
 		remindMeTool(), listRemindersTool(), cancelReminderTool(),
 		skipCheckinTool(), undoTool(),
 		rememberTool(), forgetTool(), recallTool(),
