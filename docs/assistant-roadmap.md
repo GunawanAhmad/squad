@@ -520,3 +520,21 @@ Model evals run with `eval/` (3 runs per case, fixed clock Tuesday 1 December 20
 The tool set has 39 cases (117 runs): the standalone "undo the last thing you recorded" case was dropped because nothing had been recorded in that fresh conversation, so not calling a tool was correct.
 
 `claude-haiku-5-5` is now the `assistant` default (check-ins and background jobs use it until `settings.jobs_model` is set).
+
+## Verified during Phase 2 (2026-11-25)
+
+M-9 memory and cross-language eval, keyword-only (no Ollama), 3 runs per case, throwaway schemas, fixed clock Tuesday 1 December 2026.
+
+| Model | Memory (12 cases) | Cross-language (10 cases) |
+|---|---|---|
+| **claude-haiku-5-5** (chosen) | 27/36 (75.0%) | 24/30 (80.0%) |
+| deepseek-v4-pro | 24/36 (66.7%) | 27/30 (90.0%) |
+
+**The chosen model is below the 85% cross-language bar (80.0%).** Pro is above it but scored 87.2% on the Phase 1 tool set, under the 90% gate, so it is not the default. This is the keyword-only baseline that M-10 must beat: the `simple` text search does no stemming and `websearch_to_tsquery` ANDs every term, so "burned out" does not find "capek banget, deadline bikin stres", and "allergic" does not find "allergic to peanuts".
+
+Caveats recorded with the numbers:
+
+- The first run's abstention judge rejected semantically correct answers ("I couldn't find anything") because that phrase was missing from the allowed list; the list was fixed afterwards. The memory scores above are raw from the old judge, so they undercount by up to three runs per abstention case. They were not re-run to avoid another 288 calls.
+- The judge uses substring matching; an answer that echoes the question's key phrase can pass without having retrieved the message. The cross-language number is therefore an upper bound on true recall.
+- The "forget stays forgotten" case failed all three runs for both models: the database state was correct (fact forgotten, source hidden), but the reply repeated the forgotten content ("mom visiting"). The current thread still contains the user's forget request; the persona needs a rule not to restate forgotten content.
+- No M-10 measurement was taken: the Ollama CPU container is configured but not running yet (target is the VPS), so the keyword-vs-hybrid comparison is still open.
