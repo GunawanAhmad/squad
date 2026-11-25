@@ -826,6 +826,15 @@ func runMemorySet(client llm.Model, reg *tools.Registry, persona, model, dsn str
 				cleanup()
 				return out, err
 			}
+			if embedder != nil {
+				w := assistant.EmbedWorker{Store: db, Embedder: embedder, Batch: 16, PerRun: 200}
+				for pass := 0; pass < 20; pass++ {
+					n, err := w.Once(ctx)
+					if err != nil || n == 0 {
+						break
+					}
+				}
+			}
 			rec := assistant.LoadRecords(ctx, db, evalDay, settings)
 			var retrieved []assistant.Retrieved
 			if len(c.Turns) > 0 {
