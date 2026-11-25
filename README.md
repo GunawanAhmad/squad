@@ -123,12 +123,18 @@ Ria's default route, you also need the `claude` CLI, logged in.
 
 ```sh
 cp .env.example .env   # fill in OPENCODE_API_KEY
-make dev               # starts SearXNG + Postgres + Ollama, builds the UI, serves 127.0.0.1:8080
+make dev               # compose services + hot reload on 127.0.0.1:8080
 ```
 
-Open http://127.0.0.1:8080. After changing Go code or `characters.json`, stop it
-and run `make dev` again. For hot reload of the UI, run `make ui` alongside it
-(port 5173, with `/api` proxied to the server).
+Open http://127.0.0.1:8080. The Go server proxies every non-`/api` request to
+Vite, so that URL is always the live UI: saved `.vue`/`.ts`/`.css` files
+hot-update, and a change to Go code, `store/migrations`, `characters.json` or
+`.env` rebuilds and restarts the server in place. A failed build leaves the
+previous server running and prints the compiler error. Ctrl+C stops the app and
+Vite; Postgres, SearXNG and Ollama stay up.
+
+`make ui` runs Vite alone on :5173, `make web` builds the UI into `web/`, and
+`make build` compiles `./squad`, which embeds that build and needs no Vite.
 
 ### Configuration (`.env`)
 
@@ -166,7 +172,9 @@ Add an entry to `characters.json`:
 ```
 
 Put the portrait images in `frontend/public/characters/<id>/`. That folder is
-gitignored, so the images stay on your machine. Then run `make dev` again.
+gitignored, so the images stay on your machine. A running `make dev` picks up
+the new entry when `characters.json` changes; reload the browser for a new
+portrait.
 Don't rename an `id` later: its chats and facts stay under the old one.
 
 ## Code map

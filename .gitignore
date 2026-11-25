@@ -7,3 +7,4 @@ characters
 /web
 node_modules/
 /backups
+/.tmp/

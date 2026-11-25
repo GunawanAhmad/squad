@@ -9,6 +9,8 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"regexp"
 	"slices"
@@ -144,15 +146,34 @@ func main() {
 	mux := http.NewServeMux()
 	s.routes(mux)
 
-	web, _ := fs.Sub(webFS, "web")
 	if os.Getenv("DEV") != "" {
-		web = os.DirFS("web") // serve web/ from disk, so `make web` shows up without restarting
+		// `make dev` proxies the UI to Vite so edits hot-reload at one URL;
+		// the last `make web` build answers while Vite is restarting.
+		target, err := url.Parse(envOr("VITE_URL", "http://127.0.0.1:5173"))
+		if err != nil {
+			log.Fatalf("VITE_URL: %v", err)
+		}
+		mux.Handle("GET /", devUI(target, http.FileServerFS(os.DirFS("web"))))
+	} else {
+		web, _ := fs.Sub(webFS, "web")
+		mux.Handle("GET /", http.FileServerFS(web))
 	}
-	mux.Handle("GET /", http.FileServerFS(web))
 
 	addr := envOr("ADDR", "127.0.0.1:8080") // localhost only: there is no auth, anyone who can reach it spends your quota
 	log.Printf("listening on http://%s", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
+}
+
+// devUI hands the UI to the Vite dev server, which is what makes a saved .vue
+// file show up without a rebuild, and falls back to the last built web/ while
+// Vite is down or restarting.
+func devUI(target *url.URL, fallback http.Handler) http.Handler {
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		log.Printf("dev ui: vite at %s: %v (serving web/)", target, err)
+		fallback.ServeHTTP(w, r)
+	}
+	return proxy
 }
 
 // memoryEnabled reports which characters have their memory stack on. A

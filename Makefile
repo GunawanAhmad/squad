@@ -5,12 +5,13 @@ GO_PKGS := $(shell go list ./... 2>/dev/null | grep -v node_modules)
 
 .PHONY: dev ui web lint build test search eval down
 
-# Start SearXNG, then run the app on :8080, serving the built UI from web/.
-# Go or characters.json changes need Ctrl+C and `make dev` again.
-dev: .env search build
-	DEV=1 exec ./squad # exec, not `go run`: no middle process that can die and leave the server orphaned
+# Everything with hot reload on one URL: compose services, Vite with HMR, and
+# the Go server rebuilt and restarted when Go/SQL/characters.json/.env change.
+# Ctrl+C stops the app and Vite; the compose services stay up for the next run.
+dev: .env search frontend/node_modules
+	@mkdir -p .tmp && go build -o .tmp/dev ./dev && exec .tmp/dev # exec: one process to signal, no `go run` wrapper
 
-# UI with hot reload on :5173 (run alongside `make dev`; /api is proxied to it).
+# Vite alone on :5173 (proxies /api to a running server); `make dev` runs it.
 ui: frontend/node_modules
 	cd frontend && npm run dev
 
