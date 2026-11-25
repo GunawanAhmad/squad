@@ -3,7 +3,7 @@ export GOFLAGS := -buildvcs=false
 # Not ./...: frontend/node_modules contains stray Go packages (flatted).
 GO_PKGS := $(shell go list ./... 2>/dev/null | grep -v node_modules)
 
-.PHONY: dev ui web lint build test search down
+.PHONY: dev ui web lint build test search eval down
 
 # Start SearXNG, then run the app on :8080, serving the built UI from web/.
 # Go or characters.json changes need Ctrl+C and `make dev` again.

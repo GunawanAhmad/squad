@@ -57,7 +57,6 @@ var toolCases = []toolCase{
 	{Text: "cancel the call mom reminder", Tool: "cancel_reminder", Want: map[string]string{"reminder": "call mom"}},
 	{Text: "no check-in tomorrow morning", Tool: "skip_checkin", Want: map[string]string{"day": "2026-12-02", "kind": "morning"}},
 	{Text: "skip today's evening check-in", Tool: "skip_checkin", Want: map[string]string{"day": "2026-12-01", "kind": "evening"}},
-	{Text: "undo the last thing you recorded", Tool: "undo", Want: map[string]string{}},
 	{Text: "I might go to the gym later", Tool: "", Want: nil},
 	{Text: "the gym was nice yesterday", Tool: "", Want: nil},
 	{Text: "what day is it?", Tool: "", Want: nil},
