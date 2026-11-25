@@ -53,7 +53,7 @@ var memoryCases = []memoryCase{
 		MustNot:  []string{"you live in Bali", "still in Bali"},
 		MustCall: []string{"remember"},
 		Check: func(ctx context.Context, db *store.Store) error {
-			active, err := db.Facts(ctx, store.FactFilter{Status: []string{"active"}})
+			active, err := db.Facts(ctx, "assistant", store.FactFilter{Status: []string{"active"}})
 			if err != nil {
 				return err
 			}
@@ -91,14 +91,14 @@ var memoryCases = []memoryCase{
 		MustNot:  []string{"January", "visiting"},
 		MustCall: []string{"forget"},
 		Check: func(ctx context.Context, db *store.Store) error {
-			all, err := db.Facts(ctx, store.FactFilter{Status: []string{"forgotten"}})
+			all, err := db.Facts(ctx, "assistant", store.FactFilter{Status: []string{"forgotten"}})
 			if err != nil || len(all) == 0 {
 				return fmt.Errorf("fact not forgotten: %v", err)
 			}
 			if all[0].SourceMessageID == nil {
 				return fmt.Errorf("forgotten fact has no source message")
 			}
-			m, err := db.GetMessage(ctx, *all[0].SourceMessageID)
+			m, err := db.GetMessage(ctx, "assistant", *all[0].SourceMessageID)
 			if err != nil || m.ForgottenAt == nil {
 				return fmt.Errorf("source message not hidden: %v", err)
 			}
@@ -184,7 +184,7 @@ var crossLanguageCases = []memoryCase{
 	},
 	{
 		Name:     "Indonesian message, English question (sad about moving)",
-		Messages: []seedMessage{{CharacterID: "socrates", Role: "user", Content: "aku sedih banget waktu pindah dari Bali", DaysAgo: 50}},
+		Messages: []seedMessage{{CharacterID: "assistant", Role: "user", Content: "aku sedih banget waktu pindah dari Bali", DaysAgo: 50}},
 		Turns:    []string{"When was I sad about moving?"},
 		MustAny:  [][]string{{"Bali", "sedih"}},
 		MustCall: []string{"recall"},

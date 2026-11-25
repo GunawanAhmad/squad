@@ -490,7 +490,7 @@ func runAdviceSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, p
 			}
 			now := c.NowLocal.UTC()
 			day := assistant.LogicalDay(now, evalLoc, settings.DayStartsAt)
-			rec := assistant.LoadRecords(ctx, db, day, settings)
+			rec := assistant.LoadRecords(ctx, db, "assistant", day, settings)
 			cctx := assistant.BuildContext(assistant.ContextInput{
 				Character: assistant.Character{ID: "assistant", Name: "Assistant", Persona: persona, Tools: assistantTools, Daily: true},
 				Window:    40, Now: now, Settings: settings, Records: &rec,
@@ -633,7 +633,7 @@ func seed(ctx context.Context, db *store.Store, s seedData) error {
 	for _, f := range s.facts {
 		from := evalDay.AddDate(0, 0, -f.ValidDaysAgo)
 		if _, err := db.AddFact(ctx, store.Fact{
-			Text: f.Text, Category: f.Category, Core: f.Core, ValidFrom: from,
+			CharacterID: "assistant", Text: f.Text, Category: f.Category, Core: f.Core, ValidFrom: from,
 		}); err != nil {
 			return err
 		}
@@ -652,7 +652,7 @@ func systemPrompt(ctx context.Context, db *store.Store, persona string) string {
 		TZ: "Asia/Makassar", Loc: evalLoc, DayStartsAt: 4 * time.Hour,
 		MorningAt: 8 * time.Hour, EveningAt: 21 * time.Hour,
 	}
-	rec := assistant.LoadRecords(ctx, db, evalDay, settings)
+	rec := assistant.LoadRecords(ctx, db, "assistant", evalDay, settings)
 	return assistant.BuildContext(assistant.ContextInput{
 		Character: assistant.Character{ID: "assistant", Name: "Assistant", Persona: persona, Tools: assistantTools, Daily: true},
 		Window:    40, Now: evalNow, Settings: settings, Records: &rec,
@@ -831,7 +831,7 @@ func seedMemory(ctx context.Context, db *store.Store, c memoryCase) error {
 			source = &msg.ID
 		}
 		if _, err := db.AddFact(ctx, store.Fact{
-			Text: f.Text, Category: f.Category, Core: f.Core, SourceKind: "user",
+			CharacterID: "assistant", Text: f.Text, Category: f.Category, Core: f.Core, SourceKind: "user",
 			SourceMessageID: source, ValidFrom: store.Day(at),
 		}); err != nil {
 			return err
@@ -843,7 +843,7 @@ func seedMemory(ctx context.Context, db *store.Store, c memoryCase) error {
 // coreFactsBlock mirrors the app's <memory> block for the always-in-context
 // facts, so the eval sees what a real turn sees.
 func coreFactsBlock(ctx context.Context, db *store.Store) string {
-	facts, err := db.CoreFacts(ctx, 30)
+	facts, err := db.CoreFacts(ctx, "assistant", 30)
 	if err != nil || len(facts) == 0 {
 		return ""
 	}
@@ -886,10 +886,10 @@ func runMemorySet(client llm.Model, reg *tools.Registry, persona, model, dsn str
 					}
 				}
 			}
-			rec := assistant.LoadRecords(ctx, db, evalDay, settings)
+			rec := assistant.LoadRecords(ctx, db, "assistant", evalDay, settings)
 			var retrieved []assistant.Retrieved
 			if len(c.Turns) > 0 {
-				retrieved, _ = assistant.Retrieve(ctx, db, c.Turns[0], evalLoc, "Asia/Makassar", nil, embedder)
+				retrieved, _ = assistant.Retrieve(ctx, db, "assistant", c.Turns[0], evalLoc, "Asia/Makassar", nil, embedder)
 			}
 			system := assistant.BuildContext(assistant.ContextInput{
 				Character: assistant.Character{ID: "assistant", Name: "Assistant", Persona: persona, Tools: append(assistantTools, memoryTools...), Daily: true},
@@ -1097,7 +1097,7 @@ func runGroundingSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec
 				cleanup()
 				return out, err
 			}
-			rec := assistant.LoadRecords(ctx, db, evalDay, settings)
+			rec := assistant.LoadRecords(ctx, db, "assistant", evalDay, settings)
 			cctx := assistant.BuildContext(assistant.ContextInput{
 				Character: assistant.Character{ID: "assistant", Name: "Assistant", Persona: persona, Tools: assistantTools, Daily: true},
 				Window:    40, Now: evalNow, Settings: settings, Records: &rec,
