@@ -17,7 +17,7 @@ import (
 func summaryTool() *Tool {
 	return &Tool{
 		Name:        "get_summary",
-		Description: "Read-only totals for a period: minutes logged per project and in total, plans done/dropped/moved/still open, and days with something logged. Use it before summarizing a week or month. Dates accept YYYY-MM-DD, today/yesterday; from defaults 7 days ago and to defaults today. Cite these numbers exactly; never recompute or estimate them.",
+		Description: "Read-only totals for a period: minutes logged per project and in total, plans done (by completion time) and dropped/moved/still open (by planned date), and days with something logged. Use it before summarizing a week or month. Dates accept YYYY-MM-DD, today/yesterday; from defaults 7 days ago and to defaults today. Cite these numbers exactly; never recompute or estimate them.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -51,7 +51,7 @@ func summaryTool() *Tool {
 			if to.Before(from) {
 				return Result{}, fmt.Errorf("%w: to is before from", ErrInvalid)
 			}
-			if to.Sub(from) > 366*24*time.Hour {
+			if to.Sub(from) > 365*24*time.Hour {
 				return Result{}, fmt.Errorf("%w: range is longer than a year", ErrInvalid)
 			}
 
@@ -71,6 +71,16 @@ func summaryTool() *Tool {
 			if err != nil {
 				return Result{}, err
 			}
+			// Completion is an instant, not a planned date: count done tasks by
+			// completed_at so the number agrees with the seven-day digest.
+			fromStart := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, env.Loc).Add(env.DayStartsAt)
+			toEnd := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, env.Loc).Add(env.DayStartsAt).AddDate(0, 0, 1)
+			doneTasks, err := env.DB.Tasks(ctx, store.TaskFilter{
+				Status: []string{"done"}, CompletedFrom: &fromStart, CompletedTo: &toEnd,
+			})
+			if err != nil {
+				return Result{}, err
+			}
 
 			total := 0
 			days := map[string]bool{}
@@ -80,26 +90,25 @@ func summaryTool() *Tool {
 					total += *a.Minutes
 				}
 			}
-			var done, dropped, moved, open int
+			dropped, moved, open := 0, 0, 0
 			for _, t := range plans {
 				switch t.Status {
-				case "done":
-					done++
 				case "dropped":
 					dropped++
-				default:
+				case "open":
 					open++
 				}
 				if t.TimesMoved > 0 {
 					moved++
 				}
 			}
+			done := len(doneTasks)
 
 			var b strings.Builder
 			fmt.Fprintf(&b, "period: %s..%s (%d days)\n", store.DayString(from), store.DayString(to), int(to.Sub(from).Hours()/24)+1)
 			fmt.Fprintf(&b, "minutes recorded: %d total\n", total)
 			writeProjectTotals(&b, "by project", minutesByProject(acts, names))
-			fmt.Fprintf(&b, "plans: %d done, %d dropped, %d moved (at least once), %d still open\n", done, dropped, moved, open)
+			fmt.Fprintf(&b, "plans: %d done (completed in period), %d dropped (dated in period), %d moved at least once (dated in period), %d still open (dated in period)\n", done, dropped, moved, open)
 			fmt.Fprintf(&b, "days with something logged: %d\n", len(days))
 			return text(b.String()), nil
 		},

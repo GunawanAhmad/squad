@@ -24,6 +24,7 @@ type Env struct {
 	Now             time.Time
 	DB              *store.Store   // domain tools only; nil in web-tool tests
 	Day             time.Time      // logical day (04:00 boundary)
+	DayStartsAt     time.Duration  // settings.day_starts_at, for instant-based filters
 	Loc             *time.Location // settings.tz
 	ToolCallID      int64          // this call's tool_calls row, stamped on records
 	SourceMessageID *int64         // the user message that triggered the turn

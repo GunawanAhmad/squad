@@ -165,7 +165,7 @@ func main() {
 			}
 		}
 		if contains(cfg.sets, "grounding") {
-			res, err := runGroundingSet(client, reg, specs, persona, model, judge, dsn, cfg.runs, cfg.maxSteps, cfg.limit)
+			res, err := runGroundingSet(client, reg, specs, persona, model, dsn, cfg.runs, cfg.maxSteps, cfg.limit)
 			if err != nil {
 				fmt.Printf("grounding: %v\n", err)
 			} else {
@@ -359,7 +359,7 @@ func runTimeSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, per
 	system := systemPrompt(ctx, db, persona)
 	env := tools.Env{
 		CharacterID: "assistant", Allowed: assistantTools,
-		Now: evalNow, DB: db, Day: evalDay, Loc: evalLoc,
+		Now: evalNow, DB: db, Day: evalDay, DayStartsAt: 4 * time.Hour, Loc: evalLoc,
 	}
 
 	out := passResult{perCase: map[string][2]int{}}
@@ -497,7 +497,7 @@ func runAdviceSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, p
 			})
 			env := tools.Env{
 				CharacterID: "assistant", Allowed: assistantTools, Now: now,
-				DB: db, Day: day, Loc: settings.Loc,
+				DB: db, Day: day, DayStartsAt: settings.DayStartsAt, Loc: settings.Loc,
 			}
 			answer, _, err := runTurn(ctx, client, model, cctx.System, specs, reg, env, assistant.TriggerInstruction(c.Kind), maxSteps)
 			cleanup()
@@ -898,7 +898,7 @@ func runMemorySet(client llm.Model, reg *tools.Registry, persona, model, dsn str
 			}).System
 			env := tools.Env{
 				CharacterID: "assistant", Allowed: append(assistantTools, memoryTools...),
-				Now: evalNow, DB: db, Day: evalDay, Loc: evalLoc, Embedder: embedder,
+				Now: evalNow, DB: db, Day: evalDay, DayStartsAt: 4 * time.Hour, Loc: evalLoc, Embedder: embedder,
 			}
 			answer, called, runErr := runScript(ctx, client, model, system, specs, reg, env, c.Turns, maxSteps)
 			if runErr == nil && c.Check != nil {
@@ -1072,7 +1072,7 @@ func measureEmbeddings(dsn string, embedder llm.Embedder, n int) {
 
 // ---- grounding ------------------------------------------------------------
 
-func runGroundingSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, persona, model, judgeModel, dsn string, runs, maxSteps, limit int) (passResult, error) {
+func runGroundingSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, persona, model, dsn string, runs, maxSteps, limit int) (passResult, error) {
 	ctx := context.Background()
 	settings := assistant.Settings{
 		TZ: "Asia/Makassar", Loc: evalLoc, DayStartsAt: 4 * time.Hour,
@@ -1104,7 +1104,7 @@ func runGroundingSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec
 			})
 			env := tools.Env{
 				CharacterID: "assistant", Allowed: assistantTools,
-				Now: evalNow, DB: db, Day: evalDay, Loc: evalLoc,
+				Now: evalNow, DB: db, Day: evalDay, DayStartsAt: 4 * time.Hour, Loc: evalLoc,
 			}
 			answer, called, toolTexts, err := runTurnTrace(ctx, client, model, cctx.System, specs, reg, env, c.Question, maxSteps)
 			db.Close()
@@ -1126,10 +1126,6 @@ func runGroundingSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec
 			}
 			if c.Tool != "" && !contains(called, c.Tool) {
 				fail("did not call " + c.Tool)
-				continue
-			}
-			if why := checkGroundingText(c, answer); why != "" {
-				fail(why)
 				continue
 			}
 			pass, why := judgeGroundingAnswer(c, strings.Join(toolTexts, "\n---\n"), describeSeed(sd), answer)
@@ -1163,14 +1159,27 @@ func judgeGroundingAnswer(c groundingCase, toolText, seedText, answer string) (b
 			return false, "contains " + bad
 		}
 	}
+	for _, group := range c.WantAny {
+		found := false
+		for _, opt := range group {
+			if strings.Contains(lower, strings.ToLower(opt)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false, "missing any of " + strings.Join(group, "/")
+		}
+	}
 	if c.Tool == "get_overview" {
 		var suggestions []string
+		marker := regexp.MustCompile(`^(?:\d+[.)]|[-*]|\*\*\d+[.)]\*\*|#{1,3}\s*\d+[.)]?)\s+`)
 		for _, line := range strings.Split(answer, "\n") {
 			t := strings.TrimSpace(line)
 			if t == "" {
 				continue
 			}
-			if regexp.MustCompile(`^(\d+[.)]|[-*])\s+`).MatchString(t) {
+			if marker.MatchString(t) {
 				suggestions = append(suggestions, t)
 			}
 		}
@@ -1182,15 +1191,31 @@ func judgeGroundingAnswer(c groundingCase, toolText, seedText, answer string) (b
 				return false, "uncited suggestion: " + truncate(s, 80)
 			}
 		}
-	}
-	// Every number must exist in the tool result or the seeded records (dates,
-	// ages, ids and per-entry minutes included). Numbers 1..3 are skipped:
-	// they are suggestion numbering and "three things" counts, not totals.
-	for _, n := range regexp.MustCompile(`\d+`).FindAllString(answer, -1) {
-		if len(n) == 1 && n[0] >= '1' && n[0] <= '3' {
-			continue
+		if len(suggestions) == 0 && len(c.Allowed) > 0 && !citesAllowed(answer, c.Allowed) {
+			return false, "no cited suggestion"
 		}
-		if !strings.Contains(toolText, n) && !strings.Contains(seedText, n) {
+	}
+	// Numbers must be in the tool result; date components from the seeded
+	// records are also allowed (they are dates, not totals). List markers are
+	// stripped first, so "1." numbering is not treated as a value.
+	allowed := map[string]bool{}
+	addNumber := func(n string) {
+		allowed[n] = true
+		if t := strings.TrimLeft(n, "0"); t != "" {
+			allowed[t] = true
+		}
+	}
+	for _, n := range regexp.MustCompile(`\d+`).FindAllString(toolText, -1) {
+		addNumber(n)
+	}
+	for _, date := range regexp.MustCompile(`\d{4}-\d{2}-\d{2}`).FindAllString(seedText, -1) {
+		for _, part := range strings.Split(date, "-") {
+			addNumber(part)
+		}
+	}
+	clean := regexp.MustCompile(`(?m)^\s*(?:(?:\*\*)?\d+[.)](?:\*\*)?|[-*]|#{1,3}\s*\d+[.)]?)\s+`).ReplaceAllString(answer, "")
+	for _, n := range regexp.MustCompile(`\d+`).FindAllString(clean, -1) {
+		if !allowed[n] && !strings.Contains(seedText, n) {
 			return false, "number not in records: " + n
 		}
 	}
@@ -1198,9 +1223,11 @@ func judgeGroundingAnswer(c groundingCase, toolText, seedText, answer string) (b
 }
 
 func citesAllowed(s string, allowed []string) bool {
-	lower := strings.ToLower(s)
 	for _, a := range allowed {
-		if a != "" && strings.Contains(lower, strings.ToLower(a)) {
+		if a == "" {
+			continue
+		}
+		if regexp.MustCompile(`(?i)(^|[^a-z0-9])` + regexp.QuoteMeta(a) + `($|[^a-z0-9])`).MatchString(s) {
 			return true
 		}
 	}

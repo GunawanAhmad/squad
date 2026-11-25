@@ -548,12 +548,14 @@ Run on `claude-haiku-5-5`, 3 runs per case, fixed clock Tuesday 1 December 2026.
 |---|---|
 | Grounding (10 cases) | **30/30 (100%)** |
 | No unsolicited advice (10 cases) | 30/30 (100%) |
-| Tool calls (39 cases) | 107/117 (91.5%); fields 141/153 (92.2%) |
+| Tool calls (39 cases) | 107/117 (91.5%); fields 142/153 (92.8%) |
 
-The grounding check is deterministic: the model must call `get_overview` or `get_summary`; a focus answer has at most three suggestions; each suggestion names a seeded plan, goal fact, activity or project; and every number must appear in the tool result or the seeded records. Summaries are checked for the seeded totals and invented records. An LLM judge was tried first and rejected valid seeded details (activity names/dates visible in context but not in the tool text), so it was replaced; no judge call is spent on grounding now.
+The grounding check is deterministic: the model must call `get_overview` or `get_summary`; a focus answer has at most three list/heading suggestions; each suggestion names a seeded plan, goal fact, activity or project; the summary cases pin their key totals and plan counts; and every number must appear in the tool result or the seeded records. An LLM judge was tried first and rejected valid seeded details (activity names/dates visible in context but not in the tool text), so it was replaced; no judge call is spent on grounding now.
+
+Limits of this check, recorded so the number is not over-read: it allows numbers from seeded records, so a wrong total that equals another seeded value could pass (the summary cases' pinned totals catch the important ones); a prose focus answer with no list markers only needs one citation, not one per sentence; and it does not exercise D3's "never from web" rule because the grounding spec does not offer the web tools. Those remain persona rules rather than measured behavior.
 
 The tool failures include two runs of "I dropped the newsletter idea" with no tool call, and three Indonesian "laporan" references. The tool cases seed English task titles, so no task named "laporan" exists; the model resolved to "finish the report" (`#2`), which the matcher does not accept. That is an eval-seed artifact, not a tool bug; the measured 91.5% still clears the 90% gate.
 
-The assistant persona is now 3,675 characters. Its section budget was raised from 3,000 to 4,000 during this phase: the old cap silently truncated the D3 web rules, which the Phase 3 additions pushed past the limit.
+The assistant persona is now 3,686 characters. Its section budget was raised from 3,000 to 4,000 during this phase: the old cap silently truncated the D3 web rules, which the Phase 3 additions pushed past the limit. A test now fails if the assistant persona no longer fits.
 
 Phase 2 open items are unchanged: hybrid search is off unless `EMBEDDINGS_URL` is set, the keyword/hybrid comparison is still pending, and cross-language recall remains below its bar.

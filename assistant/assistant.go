@@ -263,7 +263,7 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	env := tools.Env{
 		CharacterID: req.Character.ID, ConversationID: conv.ID,
 		Allowed: req.Character.Tools, Now: now,
-		DB: r.db, Loc: set.Loc, Day: day,
+		DB: r.db, Loc: set.Loc, Day: day, DayStartsAt: set.DayStartsAt,
 		SourceMessageID: &userMsg.ID, Embedder: r.embedder,
 	}
 

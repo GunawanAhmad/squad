@@ -50,6 +50,7 @@ func envFor(t *testing.T, db *store.Store, allowed ...string) (tools.Env, int64)
 		CharacterID: "assistant", ConversationID: conv, Allowed: allowed,
 		Now: now2026, DB: db, Loc: makassar,
 		Day:             toolsDay(),
+		DayStartsAt:     4 * time.Hour,
 		ToolCallID:      call.ID,
 		SourceMessageID: &msg.ID,
 	}, call.ID

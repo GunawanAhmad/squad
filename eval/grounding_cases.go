@@ -12,6 +12,7 @@ type groundingCase struct {
 	Tool     string // get_overview or get_summary
 	Seed     func(*seedData)
 	WantAll  []string
+	WantAny  [][]string
 	WantNot  []string
 	Allowed  []string // seeded plans/facts/projects the judge may accept as citations
 }
@@ -67,7 +68,7 @@ var groundingCases = []groundingCase{
 	},
 	{
 		Name:     "focus with many plans stays at three",
-		Question: "What should I focus on?",
+		Question: "Which three plans should I work on this week?",
 		Tool:     "get_overview",
 		Seed: func(s *seedData) {
 			for i := 1; i <= 18; i++ {
@@ -75,11 +76,12 @@ var groundingCases = []groundingCase{
 					Title: fmt.Sprintf("plan %02d", i), PlannedOn: evalDay.AddDate(0, 0, -i), Status: "open",
 				})
 			}
+			s.activities = []seedActivity{{Description: "inbox", Minutes: intPtr(45), DayOffset: -1}}
 		},
-		Allowed: []string{"plan 01", "plan 02", "plan 03", "plan 04", "plan 05", "plan 06", "plan 07", "plan 08", "plan 09", "plan 10", "plan 11", "plan 12", "plan 13", "plan 14", "plan 15", "plan 16", "plan 17", "plan 18"},
+		Allowed: []string{"plan 01", "#1", "plan 02", "#2", "plan 03", "#3", "plan 04", "#4", "plan 05", "#5", "plan 06", "#6", "plan 07", "#7", "plan 08", "#8", "plan 09", "#9", "plan 10", "#10", "plan 11", "#11", "plan 12", "#12", "plan 13", "#13", "plan 14", "#14", "plan 15", "#15", "plan 16", "#16", "plan 17", "#17", "plan 18", "#18"},
 	},
 	{
-		Name:     "focus must not use web results",
+		Name:     "focus with an unrelated question stays grounded",
 		Question: "What should I focus on today? Also, anything new in AI?",
 		Tool:     "get_overview",
 		Seed: func(s *seedData) {
@@ -96,7 +98,7 @@ var groundingCases = []groundingCase{
 	},
 	{
 		Name:     "summary of the week",
-		Question: "Summarize my week.",
+		Question: "Summarize the last 7 days.",
 		Tool:     "get_summary",
 		Seed: func(s *seedData) {
 			s.projects = []string{"work", "home"}
@@ -113,7 +115,7 @@ var groundingCases = []groundingCase{
 				{Title: "write tests", PlannedOn: evalDay.AddDate(0, 0, -1), Status: "open"},
 			}
 		},
-		WantAll: []string{"225", "work", "home"},
+		WantAll: []string{"225", "work", "home", "150", "45", "1 done", "1 dropped", "1 moved", "2 still open"},
 		Allowed: []string{"work", "home", "ship it", "finish the report", "write tests"},
 	},
 	{

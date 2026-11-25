@@ -37,6 +37,12 @@ func TestGetSummary(t *testing.T) {
 	add("sunday work", 30, env.Day.AddDate(0, 0, -1), &work.ID)
 	add("old home", 15, env.Day.AddDate(0, 0, -6), &home.ID)
 	add("outside", 999, env.Day.AddDate(0, 0, -30), &work.ID)
+	// An activity with no minutes still makes the day "logged".
+	if _, err := db.AddActivity(ctx, store.Activity{
+		Description: "walk", Day: env.Day.AddDate(0, 0, -3), ProjectID: &home.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	addTask := func(title string, planned time.Time, status string, moved int) {
 		t.Helper()
@@ -51,6 +57,22 @@ func TestGetSummary(t *testing.T) {
 	addTask("moved plan", env.Day.AddDate(0, 0, -5), "open", 2)
 	addTask("open plan", env.Day.AddDate(0, 0, -1), "open", 0)
 	addTask("outside plan", env.Day.AddDate(0, 0, 10), "open", 0)
+	// Completion is counted by completed_at, even when the plan was dated
+	// before the period (the digest uses the same rule).
+	doneAt := time.Date(2026, 12, 1, 10, 0, 0, 0, makassar)
+	doneList, err := db.Tasks(ctx, store.TaskFilter{Status: []string{"done"}})
+	if err != nil || len(doneList) != 1 {
+		t.Fatalf("done tasks: %+v, %v", doneList, err)
+	}
+	doneTask := doneList[0]
+	doneTask.CompletedAt = &doneAt
+	if _, err := db.UpdateTask(ctx, doneTask); err != nil {
+		t.Fatal(err)
+	}
+	oldDone := store.Task{Title: "finished before", Status: "done", PlannedOn: ptrDay(env.Day.AddDate(0, 0, -20)), CompletedAt: &doneAt}
+	if _, err := db.CreateTask(ctx, oldDone); err != nil {
+		t.Fatal(err)
+	}
 
 	res := runTool(t, env, "get_summary", `{"from":"2026-11-25","to":"2026-12-01"}`)
 	for _, want := range []string{
@@ -59,8 +81,8 @@ func TestGetSummary(t *testing.T) {
 		"- work: 90 min",
 		"- home: 15 min",
 		"total: 105 min",
-		"plans: 1 done, 1 dropped, 1 moved (at least once), 2 still open",
-		"days with something logged: 3",
+		"plans: 2 done (completed in period), 1 dropped (dated in period), 1 moved at least once (dated in period), 2 still open (dated in period)",
+		"days with something logged: 4",
 	} {
 		if !strings.Contains(res.Text, want) {
 			t.Fatalf("summary missing %q:\n%s", want, res.Text)
@@ -74,7 +96,7 @@ func TestGetSummary(t *testing.T) {
 	for _, want := range []string{
 		"minutes recorded: 0 total",
 		"by project: no minutes recorded",
-		"plans: 0 done, 0 dropped, 0 moved (at least once), 0 still open",
+		"plans: 0 done (completed in period), 0 dropped (dated in period), 0 moved at least once (dated in period), 0 still open (dated in period)",
 		"days with something logged: 0",
 	} {
 		if !strings.Contains(empty.Text, want) {
@@ -91,12 +113,18 @@ func TestGetSummaryValidation(t *testing.T) {
 		`{"from":"2024-01-01","to":"2026-12-01"}`,
 		`{"from":"someday","to":"2026-12-01"}`,
 		`{"from":"2026-12-01","to":"nope"}`,
+		`{"from":"2026-01-01","to":"2027-01-02"}`,
 	} {
 		if _, err := toolsRun(env, "get_summary", args); err == nil {
 			t.Fatalf("expected error for %s", args)
 		}
 	}
+	if _, err := toolsRun(env, "get_summary", `{"from":"2026-01-01","to":"2027-01-01"}`); err != nil {
+		t.Fatalf("366-day range should be accepted: %v", err)
+	}
 }
+
+func ptrDay(t time.Time) *time.Time { return &t }
 
 func TestLogAtOneThirtyCountsForPreviousDay(t *testing.T) {
 	db := storetest.New(t)

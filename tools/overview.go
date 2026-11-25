@@ -86,16 +86,16 @@ func writePlans(b *strings.Builder, plans []store.Task, day time.Time) {
 		if shown == overviewPlanCap {
 			break
 		}
-		planned := "no planned date"
-		age := -1
-		if t.PlannedOn != nil {
-			planned = store.DayString(*t.PlannedOn)
-			age = daysBetween(*t.PlannedOn, day)
+		if t.PlannedOn == nil {
+			fmt.Fprintf(b, "- #%d %s — no planned date, moved %dx\n", t.ID, t.Title, t.TimesMoved)
+			shown++
+			continue
 		}
-		switch {
-		case age < 0:
-			fmt.Fprintf(b, "- #%d %s — planned %s\n", t.ID, t.Title, planned)
-		default:
+		planned := store.DayString(*t.PlannedOn)
+		age := daysBetween(*t.PlannedOn, day)
+		if age < 0 {
+			fmt.Fprintf(b, "- #%d %s — planned %s, moved %dx\n", t.ID, t.Title, planned, t.TimesMoved)
+		} else {
 			fmt.Fprintf(b, "- #%d %s — planned %s, age %dd, moved %dx\n", t.ID, t.Title, planned, age, t.TimesMoved)
 		}
 		shown++

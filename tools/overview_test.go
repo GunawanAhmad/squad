@@ -31,7 +31,7 @@ func TestGetOverview(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	done := env.Day.AddDate(0, 0, -1)
+	done := env.Day.AddDate(0, 0, -30) // oldest, so it would show if the filter were missing
 	if _, err := db.CreateTask(ctx, store.Task{Title: "finished thing", Status: "done", PlannedOn: &done}); err != nil {
 		t.Fatal(err)
 	}
@@ -54,6 +54,11 @@ func TestGetOverview(t *testing.T) {
 	add("too old", 999, -40, &work.ID)
 	add("no project", 15, -1, nil)
 
+	if _, err := db.AddFact(ctx, store.Fact{
+		Text: "prefers tea", Category: "preference", ValidFrom: env.Day.AddDate(0, 0, -10),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 12; i++ {
 		if _, err := db.AddFact(ctx, store.Fact{
 			Text: fmt.Sprintf("goal %02d", i), Category: "goal", ValidFrom: env.Day.AddDate(0, 0, -30),
@@ -95,12 +100,13 @@ func TestGetOverview(t *testing.T) {
 		"total: 225 min",
 		"goal facts (13 total)",
 		"+3 more goal facts",
+		"#20 plan 19 — planned 2026-11-11, age 20d, moved 1x",
 	} {
 		if !strings.Contains(res.Text, want) {
 			t.Fatalf("overview missing %q:\n%s", want, res.Text)
 		}
 	}
-	for _, bad := range []string{"finished thing", "dropped thing", "old goal", "forgotten goal"} {
+	for _, bad := range []string{"finished thing", "dropped thing", "old goal", "forgotten goal", "prefers tea", "plan 00"} {
 		if strings.Contains(res.Text, bad) {
 			t.Fatalf("overview included %q:\n%s", bad, res.Text)
 		}
@@ -137,5 +143,63 @@ func TestOverviewProjectCap(t *testing.T) {
 	if n := strings.Count(res.Text, ": 1 min\n"); n != 20 {
 		// 10 projects in each of the 7-day and 30-day blocks.
 		t.Fatalf("expected 10 projects per period, got %d:\n%s", n, res.Text)
+	}
+}
+
+func TestOverviewFuturePlanKeepsMoved(t *testing.T) {
+	db := storetest.New(t)
+	env, _ := envFor(t, db, "get_overview")
+	planned := env.Day.AddDate(0, 0, 2)
+	if _, err := db.CreateTask(context.Background(), store.Task{
+		Title: "future plan", Status: "open", PlannedOn: &planned, TimesMoved: 3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	res := runTool(t, env, "get_overview", `{}`)
+	if !strings.Contains(res.Text, "planned 2026-12-03, moved 3x") {
+		t.Fatalf("future plan lost its moved count:\n%s", res.Text)
+	}
+	if strings.Contains(res.Text, "age -") {
+		t.Fatalf("negative age printed:\n%s", res.Text)
+	}
+}
+
+func TestOverviewWindows(t *testing.T) {
+	db := storetest.New(t)
+	env, _ := envFor(t, db, "get_overview")
+	ctx := context.Background()
+	p, err := db.EnsureProject(ctx, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := func(offset, minutes int) {
+		t.Helper()
+		m := minutes
+		if _, err := db.AddActivity(ctx, store.Activity{
+			Description: "work", Minutes: &m, Day: env.Day.AddDate(0, 0, offset), ProjectID: &p.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add(-6, 10)  // inside 7 and 30
+	add(-7, 20)  // outside 7, inside 30
+	add(-29, 30) // outside 7, inside 30
+	add(-30, 40) // outside both
+	res := runTool(t, env, "get_overview", `{}`)
+	if !strings.Contains(res.Text, "minutes per project, last 7 days") ||
+		!strings.Contains(res.Text, "total: 10 min") ||
+		!strings.Contains(res.Text, "total: 60 min") {
+		t.Fatalf("window totals wrong:\n%s", res.Text)
+	}
+}
+
+func TestOverviewEmpty(t *testing.T) {
+	db := storetest.New(t)
+	env, _ := envFor(t, db, "get_overview")
+	res := runTool(t, env, "get_overview", `{}`)
+	for _, want := range []string{"open plans: none", "goal facts: none", "no minutes recorded"} {
+		if !strings.Contains(res.Text, want) {
+			t.Fatalf("empty overview missing %q:\n%s", want, res.Text)
+		}
 	}
 }
