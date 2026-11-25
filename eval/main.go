@@ -200,6 +200,7 @@ func runToolSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, per
 		return toolResult{}, err
 	}
 	defer cleanup()
+	defer db.Close()
 	if err := seed(ctx, db, defaultSeed()); err != nil {
 		return toolResult{}, err
 	}
@@ -219,7 +220,7 @@ func runToolSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, per
 			break
 		}
 		for i := 0; i < runs; i++ {
-			resp, err := client.Stream(ctx, llm.Request{
+			resp, err := streamCall(ctx, client, llm.Request{
 				Model: model, System: system, Tools: specs, Session: "eval-tools",
 				Messages: []llm.Message{{Role: "user", Content: c.Text}},
 			}, func(string) {})
@@ -314,6 +315,7 @@ func runTimeSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, per
 		return passResult{}, err
 	}
 	defer cleanup()
+	defer db.Close()
 	if err := seed(ctx, db, defaultSeed()); err != nil {
 		return passResult{}, err
 	}
@@ -391,7 +393,7 @@ func judgeTimeAnswer(c timeCase, answer string) (bool, string) {
 func runTurn(ctx context.Context, client llm.Model, model, system string, specs []llm.ToolSpec, reg *tools.Registry, env tools.Env, question string, maxSteps int) (string, []llm.ToolCall, error) {
 	msgs := []llm.Message{{Role: "user", Content: question}}
 	for step := 0; step < maxSteps; step++ {
-		resp, err := client.Stream(ctx, llm.Request{
+		resp, err := streamCall(ctx, client, llm.Request{
 			Model: model, System: system, Messages: msgs, Tools: specs, Session: "eval-turn",
 		}, func(string) {})
 		if err != nil {
@@ -502,7 +504,7 @@ func judgeAdvice(ctx context.Context, client llm.Model, model, answer string) (b
 		"Message:\n\"\"\"\n" + answer + "\n\"\"\"\n\n" +
 		"Reply with JSON only: {\"pass\": true} if it only asks/reflects and contains no advice, " +
 		"{\"pass\": false} otherwise. Add \"why\" with at most 15 words."
-	resp, err := client.Stream(ctx, llm.Request{
+	resp, err := streamCall(ctx, client, llm.Request{
 		Model: model, Session: "eval-judge",
 		Messages: []llm.Message{{Role: "user", Content: prompt}},
 	}, func(string) {})
@@ -818,6 +820,7 @@ func runMemorySet(client llm.Model, reg *tools.Registry, persona, model, dsn str
 			if runErr == nil && c.Check != nil {
 				runErr = c.Check(ctx, db)
 			}
+			db.Close()
 			cleanup()
 
 			out.total++
@@ -888,6 +891,13 @@ func judgeMemory(c memoryCase, answer string, called []string) (bool, string) {
 	return true, ""
 }
 
+// streamCall bounds one model call so a stuck gateway cannot stall a whole run.
+func streamCall(ctx context.Context, client llm.Model, req llm.Request, onText func(string)) (llm.Response, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	return client.Stream(ctx, req, onText)
+}
+
 // runScript plays several user turns, executing the model's tools for real.
 func runScript(ctx context.Context, client llm.Model, model, system string, specs []llm.ToolSpec, reg *tools.Registry, env tools.Env, turns []string, maxSteps int) (string, []string, error) {
 	var msgs []llm.Message
@@ -896,7 +906,7 @@ func runScript(ctx context.Context, client llm.Model, model, system string, spec
 	for _, turn := range turns {
 		msgs = append(msgs, llm.Message{Role: "user", Content: turn})
 		for step := 0; step < maxSteps; step++ {
-			resp, err := client.Stream(ctx, llm.Request{
+			resp, err := streamCall(ctx, client, llm.Request{
 				Model: model, System: system, Messages: msgs, Tools: specs, Session: "eval-memory",
 			}, func(string) {})
 			if err != nil {

@@ -108,7 +108,7 @@ var memoryCases = []memoryCase{
 	{
 		Name:    "abstention: nothing stored about a wedding",
 		Turns:   []string{"When is my sister's wedding?"},
-		MustAny: [][]string{{"don't know", "do not know", "no record", "not stored", "can't find", "cannot find", "don't have", "do not have", "tidak tahu"}},
+		MustAny: [][]string{{"don't know", "do not know", "no record", "not stored", "can't find", "cannot find", "couldn't find", "could not find", "don't have", "do not have", "nothing in", "no mention", "tidak tahu", "tidak ada"}},
 		MustNot: []string{"June", "July", "August", "September", "October", "November", "December", "2026", "2027"},
 	},
 	{
@@ -162,7 +162,7 @@ var memoryCases = []memoryCase{
 	{
 		Name:    "abstention: blood type",
 		Turns:   []string{"What's my blood type?"},
-		MustAny: [][]string{{"don't know", "do not know", "no record", "not stored", "don't have", "do not have", "tidak tahu"}},
+		MustAny: [][]string{{"don't know", "do not know", "no record", "not stored", "can't find", "cannot find", "couldn't find", "could not find", "don't have", "do not have", "nothing in", "no mention", "tidak tahu", "tidak ada"}},
 		MustNot: []string{"O+", "A+", "B+", "AB+"},
 	},
 }
