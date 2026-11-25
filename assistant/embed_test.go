@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"characters/store"
-	"characters/store/storetest"
+	"squad/store"
+	"squad/store/storetest"
 )
 
 type fakeEmbedder struct {

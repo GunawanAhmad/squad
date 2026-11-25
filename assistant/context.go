@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"characters/llm"
-	"characters/store"
+	"squad/llm"
+	"squad/store"
 )
 
 const DefaultWindow = 40

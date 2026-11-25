@@ -19,7 +19,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"characters/store"
+	"squad/store"
 )
 
 // New creates a fresh schema, migrates it, and drops it when the test ends.

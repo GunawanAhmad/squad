@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"characters/assistant"
-	"characters/store"
+	"squad/assistant"
+	"squad/store"
 )
 
 // apiStore is the store surface the HTTP handlers use. *store.Store satisfies

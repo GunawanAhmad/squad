@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"characters/tools"
+	"squad/tools"
 )
 
 // evalNow is the fixed clock every case is judged against:

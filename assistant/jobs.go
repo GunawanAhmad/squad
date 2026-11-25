@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"characters/llm"
-	"characters/store"
+	"squad/llm"
+	"squad/store"
 )
 
 // Background jobs: the day-close fact extraction and the rolling summary. They

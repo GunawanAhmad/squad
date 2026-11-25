@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"characters/store"
-	"characters/store/storetest"
-	"characters/tools"
+	"squad/store"
+	"squad/store/storetest"
+	"squad/tools"
 )
 
 // write runs a write tool and stores its inverse operation the way the turn

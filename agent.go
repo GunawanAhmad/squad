@@ -4,7 +4,7 @@ import (
 	"os"
 	"sync"
 
-	"characters/llm"
+	"squad/llm"
 )
 
 // Created lazily so .env is loaded first.

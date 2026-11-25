@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"characters/store"
-	"characters/store/storetest"
+	"squad/store"
+	"squad/store/storetest"
 )
 
 func TestGetOverview(t *testing.T) {

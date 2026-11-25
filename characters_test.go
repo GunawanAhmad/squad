@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"characters/assistant"
-	"characters/tools"
+	"squad/assistant"
+	"squad/tools"
 )
 
 func loadCharacters(t *testing.T) []Character {

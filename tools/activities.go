@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"characters/store"
+	"squad/store"
 )
 
 // Activity tools write and read "what I did". Minutes are only stored when the

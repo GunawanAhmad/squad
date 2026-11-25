@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"characters/store"
+	"squad/store"
 )
 
 // fakeStore implements assistant.Store in memory, so the loop tests need no

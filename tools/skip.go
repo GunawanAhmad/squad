@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"characters/store"
+	"squad/store"
 )
 
 // skip_checkin lets the user say "no check-in tomorrow morning". The row is

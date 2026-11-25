@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"characters/store"
+	"squad/store"
 )
 
 // Task tools write the "what I want to do" rows. Every write returns the

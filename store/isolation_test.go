@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"characters/store"
-	"characters/store/storetest"
+	"squad/store"
+	"squad/store/storetest"
 )
 
 // Isolation is enforced here, not in a prompt: every fact and message read

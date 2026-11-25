@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"characters/store"
+	"squad/store"
 )
 
 // Reminder tools write the "tell me at ..." rows. Times are parsed in the

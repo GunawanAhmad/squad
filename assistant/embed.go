@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	"characters/llm"
-	"characters/store"
+	"squad/llm"
+	"squad/store"
 )
 
 // EmbedWorker fills embedding columns in small batches. It skips tool/trigger

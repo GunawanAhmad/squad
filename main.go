@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"characters/assistant"
-	"characters/llm"
-	"characters/store"
-	"characters/tools"
+	"squad/assistant"
+	"squad/llm"
+	"squad/store"
+	"squad/tools"
 )
 
 //go:embed web

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"characters/llm"
-	"characters/store"
+	"squad/llm"
+	"squad/store"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite testdata golden files")

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"characters/store"
+	"squad/store"
 )
 
 // ErrInvalid marks input the caller should have rejected (HTTP 400).

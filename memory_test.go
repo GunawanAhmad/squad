@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"characters/store"
-	"characters/store/storetest"
+	"squad/store"
+	"squad/store/storetest"
 )
 
 // Test fixtures live in a temp dir, never in memory/: that directory is the

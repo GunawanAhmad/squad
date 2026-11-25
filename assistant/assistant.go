@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"characters/llm"
-	"characters/store"
-	"characters/tools"
+	"squad/llm"
+	"squad/store"
+	"squad/tools"
 )
 
 const (

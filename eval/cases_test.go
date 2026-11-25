@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"characters/llm"
+	"squad/llm"
 )
 
 func TestMatchArgTaskByIDAndDateDefaults(t *testing.T) {

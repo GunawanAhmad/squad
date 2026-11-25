@@ -20,7 +20,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
       A conversation game
     </p>
     <h1 class="logo">
-      CHARACTERS
+      SQUAD
     </h1>
     <button
       class="press-start"

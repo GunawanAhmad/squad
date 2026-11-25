@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"characters/store"
-	"characters/store/storetest"
-	"characters/tools"
+	"squad/store"
+	"squad/store/storetest"
+	"squad/tools"
 )
 
 func TestGetSummary(t *testing.T) {

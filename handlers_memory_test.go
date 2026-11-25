@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"characters/store"
+	"squad/store"
 )
 
 func dayOf(y int, m time.Month, d int) time.Time {

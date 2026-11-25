@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"characters/llm"
-	"characters/store"
-	"characters/store/storetest"
+	"squad/llm"
+	"squad/store"
+	"squad/store/storetest"
 )
 
 func localDay(y int, m time.Month, d int) time.Time {

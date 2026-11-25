@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"characters/llm"
-	"characters/store"
-	"characters/store/storetest"
+	"squad/llm"
+	"squad/store"
+	"squad/store/storetest"
 )
 
 // The check-in engine is tested with a fake clock and the real store: what

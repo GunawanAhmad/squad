@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"characters/llm"
+	"squad/llm"
 )
 
 func TestOpenCodeStream(t *testing.T) {

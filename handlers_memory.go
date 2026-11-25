@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"characters/assistant"
-	"characters/store"
-	"characters/tools"
+	"squad/assistant"
+	"squad/store"
+	"squad/tools"
 )
 
 // The Memory screen: facts (list, edit, history, forget), search, forgetting one

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"characters/llm"
+	"squad/llm"
 )
 
 func TestExtractJSONObject(t *testing.T) {

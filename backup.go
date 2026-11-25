@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"characters/assistant"
+	"squad/assistant"
 )
 
 const (

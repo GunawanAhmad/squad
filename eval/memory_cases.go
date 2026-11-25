@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"characters/store"
+	"squad/store"
 )
 
 // The memory eval (§7): knowledge update, temporal question, forget (and it

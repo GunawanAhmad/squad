@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"characters/llm"
-	"characters/store"
-	"characters/store/storetest"
-	"characters/tools"
+	"squad/llm"
+	"squad/store"
+	"squad/store/storetest"
+	"squad/tools"
 )
 
 // One agent's memory must never reach another agent. These tests use the real

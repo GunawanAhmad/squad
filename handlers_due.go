@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"characters/store"
+	"squad/store"
 )
 
 // handleDue is the lazy scheduler (D4). The poll gets its answer from the

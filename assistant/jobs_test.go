@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"characters/llm"
-	"characters/store"
+	"squad/llm"
+	"squad/store"
 )
 
 // Day-close and summary tests use the real store and the fake model: what

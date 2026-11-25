@@ -8,7 +8,7 @@ GO_PKGS := $(shell go list ./... 2>/dev/null | grep -v node_modules)
 # Start SearXNG, then run the app on :8080, serving the built UI from web/.
 # Go or characters.json changes need Ctrl+C and `make dev` again.
 dev: .env search build
-	DEV=1 exec ./characters # exec, not `go run`: no middle process that can die and leave the server orphaned
+	DEV=1 exec ./squad # exec, not `go run`: no middle process that can die and leave the server orphaned
 
 # UI with hot reload on :5173 (run alongside `make dev`; /api is proxied to it).
 ui: frontend/node_modules
@@ -25,7 +25,7 @@ frontend/node_modules: frontend/package-lock.json
 	cd frontend && npm ci && touch node_modules
 
 build: web
-	go build -o characters .
+	go build -o squad .
 
 test: web lint
 	go vet $(GO_PKGS)

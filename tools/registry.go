@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"characters/llm"
-	"characters/store"
+	"squad/llm"
+	"squad/store"
 )
 
 // Env is what a tool may know about the turn it runs in.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"characters/store"
+	"squad/store"
 )
 
 // The overview is the compact, read-only picture the model gets before it is

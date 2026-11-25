@@ -1,4 +1,4 @@
-# characters
+# squad
 
 A character chat app that is growing into a personal assistant: Vue frontend, Go
 server, Postgres for every conversation.
@@ -39,7 +39,7 @@ docker compose exec -T postgres pg_restore -U characters -d characters_scratch \
 # 3. Start the app against the scratch database (migrations see version 1 and
 #    do nothing to a restored schema) and check a conversation.
 DATABASE_URL='postgres://characters:characters@127.0.0.1:5432/characters_scratch?sslmode=disable' \
-  ADDR=127.0.0.1:8099 ./characters
+  ADDR=127.0.0.1:8099 ./squad
 #    curl -s 'http://127.0.0.1:8099/api/conversations?characterId=general'
 
 # 4. Clean up.

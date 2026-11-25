@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"characters/store"
-	"characters/tools"
+	"squad/store"
+	"squad/tools"
 )
 
 // Records is the "hard facts about the day" section of the prompt: today's

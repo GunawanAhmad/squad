@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"characters/store"
-	"characters/store/storetest"
-	"characters/tools"
+	"squad/store"
+	"squad/store/storetest"
+	"squad/tools"
 )
 
 func TestSkipCheckin(t *testing.T) {

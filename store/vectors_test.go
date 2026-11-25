@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"characters/store"
-	"characters/store/storetest"
+	"squad/store"
+	"squad/store/storetest"
 )
 
 // unit returns a 1024-dim vector with 1 at i. Cosine distance then behaves like

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"characters/llm"
-	"characters/store"
+	"squad/llm"
+	"squad/store"
 )
 
 // Memory tools: remember (with supersede), forget (only after the user

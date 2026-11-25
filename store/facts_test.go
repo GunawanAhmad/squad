@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"characters/store"
-	"characters/store/storetest"
+	"squad/store"
+	"squad/store/storetest"
 )
 
 // testOwner is the character every fact in these tests belongs to.

@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"characters/store"
-	"characters/tools"
+	"squad/store"
+	"squad/tools"
 )
 
 // The check-in engine is lazy: the UI's 60 s poll calls Decide, which is pure

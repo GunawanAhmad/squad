@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"characters/store"
-	"characters/store/storetest"
+	"squad/store"
+	"squad/store/storetest"
 )
 
 func day(y int, m time.Month, d int) time.Time {

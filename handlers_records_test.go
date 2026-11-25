@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"characters/assistant"
-	"characters/llm"
-	"characters/store"
-	"characters/store/storetest"
-	"characters/tools"
+	"squad/assistant"
+	"squad/llm"
+	"squad/store"
+	"squad/store/storetest"
+	"squad/tools"
 )
 
 // fixed clock: 2026-12-01 09:00 in Asia/Makassar (UTC+8), so the logical day is

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"characters/llm"
+	"squad/llm"
 )
 
 // Structured asks a model for exactly one JSON object and parses it. There is

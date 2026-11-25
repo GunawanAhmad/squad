@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"characters/store"
+	"squad/store"
 )
 
 const DefaultTZ = "Asia/Makassar"

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"characters/store"
-	"characters/store/storetest"
-	"characters/tools"
+	"squad/store"
+	"squad/store/storetest"
+	"squad/tools"
 )
 
 func TestLogAndQueryActivities(t *testing.T) {

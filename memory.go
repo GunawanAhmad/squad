@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"characters/store"
+	"squad/store"
 )
 
 // memory/ holds profile.md (a file the user edits) and, from Phase 0, one

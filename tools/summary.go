@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"characters/store"
+	"squad/store"
 )
 
 // get_summary is the SQL-backed aggregate for "summarize my week/month". It

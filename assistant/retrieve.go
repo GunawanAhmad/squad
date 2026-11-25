@@ -7,8 +7,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"characters/llm"
-	"characters/store"
+	"squad/llm"
+	"squad/store"
 )
 
 // Pre-retrieval: before a turn, search the user's own history with their

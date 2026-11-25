@@ -21,11 +21,11 @@ import (
 	"strings"
 	"time"
 
-	"characters/assistant"
-	"characters/llm"
-	"characters/store"
-	"characters/store/storetest"
-	"characters/tools"
+	"squad/assistant"
+	"squad/llm"
+	"squad/store"
+	"squad/store/storetest"
+	"squad/tools"
 )
 
 type config struct {

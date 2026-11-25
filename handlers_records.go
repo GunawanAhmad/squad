@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"characters/assistant"
-	"characters/store"
-	"characters/tools"
+	"squad/assistant"
+	"squad/store"
+	"squad/tools"
 )
 
 // REST for the Today panel. These edits do not go through the model, so they

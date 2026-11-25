@@ -20,7 +20,7 @@ func NewOpenCode(apiKey, baseURL string) *OpenCode {
 	c := openai.NewClient(
 		option.WithBaseURL(baseURL),
 		option.WithAPIKey(apiKey),
-		option.WithHeader("User-Agent", "characters/0.1"),
+		option.WithHeader("User-Agent", "squad/0.1"),
 	)
 	return &OpenCode{Client: &c}
 }

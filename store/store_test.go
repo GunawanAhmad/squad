@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"characters/store"
-	"characters/store/storetest"
+	"squad/store"
+	"squad/store/storetest"
 )
 
 func TestConversationsAndMessages(t *testing.T) {

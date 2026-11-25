@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"characters/llm"
-	"characters/store/storetest"
-	"characters/tools"
+	"squad/llm"
+	"squad/store/storetest"
+	"squad/tools"
 )
 
 var (
