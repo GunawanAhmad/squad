@@ -187,7 +187,7 @@ Don't rename an `id` later: its chats and facts stay under the old one.
 | `tools/` | The tool registry and every tool. |
 | `store/` | Postgres access and numbered migrations (`store/migrations/`). |
 | `eval/` | Model evals for tool use and memory. These spend real API credit. |
-| `frontend/` | Vue app: title, character select, chat and Memory screens. It builds into `web/`, which the binary embeds. |
+| `frontend/` | Vue app: character home, chat with a character rail, and the Memory screen. It builds into `web/`, which the binary embeds. |
 | `docs/` | `assistant-roadmap.md` (design decisions and what was verified), `memory-research.md`. |
 
 ## Tests and evals

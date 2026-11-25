@@ -108,7 +108,7 @@
     "ui": {
       "tagline": "Keeps your day: plans, what you did, reminders.",
       "description": "Personal assistant. Morning and evening check-ins, what you plan and what you actually did. It asks, it records, it never lectures. Ask it anything else and it answers, searching the web when needed.",
-      "accentColor": "#57d98b",
+      "accentColor": "#b18cff",
       "selectLine": "What do you want to get done today?",
       "stats": [
         {

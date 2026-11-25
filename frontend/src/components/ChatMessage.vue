@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUpdated, ref } from 'vue';
 import { highlight, renderMarkdown } from '../markdown';
-import type { Character, Message, ToolCall } from '../types';
+import CharacterPortrait from './CharacterPortrait.vue';
+import type { Character, Message, PortraitState, ToolCall } from '../types';
 
-const props = defineProps<{ message: Message; character: Character }>();
+const props = withDefaults(
+  defineProps<{ message: Message; character: Character; showName?: boolean; state?: PortraitState }>(),
+  { state: 'idle' },
+);
 const emit = defineEmits<{ undo: [toolCallId: number] }>();
 const root = ref<HTMLElement | null>(null);
 
@@ -51,6 +55,17 @@ function toolLabel(t: ToolCall) {
     class="msg"
     :class="message.role"
   >
+    <div
+      v-if="showName"
+      class="msg-who"
+    >
+      <CharacterPortrait
+        :character="character"
+        :state="state"
+        class="mini avatar"
+      />
+      {{ character.name }}
+    </div>
     <span
       v-for="(t, i) in message.tools ?? []"
       :key="i"

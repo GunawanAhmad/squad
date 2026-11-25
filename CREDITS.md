@@ -17,4 +17,4 @@ Text blips and fallback UI sounds are synthesized in the browser with the Web Au
 
 ## Fonts
 
-[Press Start 2P](https://fonts.google.com/specimen/Press+Start+2P) by CodeMan38 and [Chakra Petch](https://fonts.google.com/specimen/Chakra+Petch) by Cadson Demak, SIL Open Font License 1.1, loaded from Google Fonts.
+[Inter](https://fonts.google.com/specimen/Inter) by Rasmus Andersson and [Chakra Petch](https://fonts.google.com/specimen/Chakra+Petch) by Cadson Demak, SIL Open Font License 1.1, loaded from Google Fonts.

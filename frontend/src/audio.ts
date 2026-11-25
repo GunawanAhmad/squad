@@ -16,7 +16,7 @@ const buffers: Partial<Record<Sfx, AudioBuffer>> = {};
 let ctx: AudioContext | null = null;
 let out: GainNode | null = null;
 
-// Browsers block audio until a user gesture; PRESS START calls this.
+// Browsers block audio until a user gesture; App calls this on the first click or key.
 export function unlock() {
   if (ctx) return void ctx.resume();
   ctx = new AudioContext();

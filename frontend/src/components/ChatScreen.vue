@@ -2,7 +2,6 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { blip, play } from '../audio';
 import ChatMessage from './ChatMessage.vue';
-import CharacterPortrait from './CharacterPortrait.vue';
 import GameButton from './GameButton.vue';
 import GameSelect from './GameSelect.vue';
 import type {
@@ -57,7 +56,7 @@ const portraitState = computed<PortraitState>(() => {
 watch(messages, () => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight; }, { deep: true, flush: 'post' });
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape' && !(e.target as Element).closest('.hud')) {
+  if (e.key === 'Escape' && !(e.target as Element).closest('.tools')) {
     if (panelOpen.value) panelOpen.value = false;
     else back();
   }
@@ -517,22 +516,12 @@ async function send() {
     class="chat-screen"
     :style="{ '--accent': c.ui.accentColor }"
   >
-    <div class="bust">
-      <CharacterPortrait
-        :character="c"
-        :state="portraitState"
-      />
-      <div class="nameplate">
-        {{ c.name }}
-      </div>
-    </div>
-
     <main>
       <header>
-        <GameButton @click="back">
-          ◀ Select
-        </GameButton>
-        <h2>{{ c.name }}</h2>
+        <div class="who">
+          <h1>{{ c.name }}</h1>
+          <p>{{ c.ui.tagline }}</p>
+        </div>
         <template v-if="isAssistant">
           <GameButton
             v-if="pastView"
@@ -563,9 +552,21 @@ async function send() {
         />
         <GameButton
           v-if="!isAssistant"
+          class="icon"
+          aria-label="New chat"
+          title="New chat"
           @click="clear"
         >
-          New chat
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            aria-hidden="true"
+          ><path d="M12 5v14M5 12h14" /></svg>
         </GameButton>
       </header>
 
@@ -584,6 +585,8 @@ async function send() {
           :key="i"
           :message="m"
           :character="c"
+          :show-name="m.role === 'assistant' && messages[i - 1]?.role !== 'assistant'"
+          :state="i === messages.length - 1 ? portraitState : 'idle'"
           @undo="undoFromChat"
         />
       </div>
@@ -593,7 +596,7 @@ async function send() {
           ref="inputEl"
           v-model="input"
           rows="1"
-          :placeholder="ready ? 'Message…' : 'Loading…'"
+          :placeholder="ready ? `Message ${c.name}…` : 'Loading…'"
           aria-label="Message"
           :disabled="!ready"
           @input="resize"
@@ -601,9 +604,22 @@ async function send() {
         />
         <GameButton
           variant="primary"
+          class="icon"
+          aria-label="Send"
+          title="Send"
           :disabled="busy || !ready"
         >
-          Send
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          ><path d="M12 19V5M5 12l7-7 7 7" /></svg>
         </GameButton>
       </form>
     </main>
