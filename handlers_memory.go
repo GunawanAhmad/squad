@@ -16,9 +16,28 @@ import (
 	"characters/tools"
 )
 
-// The Memory screen: facts (list, edit, history, forget), search over all past
-// messages, forgetting one message or a whole day, and editing profile.md.
-// Facts are never hard-deleted, and forgetting a fact also hides its source.
+// The Memory screen: facts (list, edit, history, forget), search, forgetting one
+// message or a whole day, and editing profile.md. Facts are never hard-deleted,
+// and forgetting a fact also hides its source.
+//
+// These endpoints are the only cross-agent access in the app, and every one of
+// them takes an explicit ?character= so switching the selector changes exactly
+// whose memory is read or written. The agents themselves never pass through
+// here: their store calls are scoped by the calling character.
+
+// memoryCharacter reads the explicit character the screen is acting for.
+func (s *server) memoryCharacter(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := strings.TrimSpace(r.URL.Query().Get("character"))
+	if id == "" {
+		http.Error(w, "character is required", http.StatusBadRequest)
+		return "", false
+	}
+	if _, ok := s.chars[id]; !ok {
+		http.Error(w, "unknown character", http.StatusBadRequest)
+		return "", false
+	}
+	return id, true
+}
 
 func (s *server) memoryPath() string {
 	if s.memoryDir != "" {
@@ -28,6 +47,10 @@ func (s *server) memoryPath() string {
 }
 
 func (s *server) handleListFacts(w http.ResponseWriter, r *http.Request) {
+	characterID, ok := s.memoryCharacter(w, r)
+	if !ok {
+		return
+	}
 	q := r.URL.Query()
 	limit := queryInt(r, "limit", 100)
 	if limit < 1 || limit > 500 {
@@ -53,9 +76,9 @@ func (s *server) handleListFacts(w http.ResponseWriter, r *http.Request) {
 	var facts []store.Fact
 	var err error
 	if text := strings.TrimSpace(q.Get("q")); text != "" {
-		facts, err = s.records.SearchFacts(r.Context(), store.FactQuery{Text: text, Limit: limit})
+		facts, err = s.records.SearchFacts(r.Context(), store.FactQuery{CharacterID: characterID, Text: text, Limit: limit})
 	} else {
-		facts, err = s.records.Facts(r.Context(), f)
+		facts, err = s.records.Facts(r.Context(), characterID, f)
 	}
 	if err != nil {
 		serverError(w, "list facts", err)
@@ -73,6 +96,10 @@ func (s *server) handlePatchFact(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	characterID, ok := s.memoryCharacter(w, r)
+	if !ok {
+		return
+	}
 	var patch struct {
 		Text     *string `json:"text,omitempty"`
 		Category *string `json:"category,omitempty"`
@@ -82,7 +109,7 @@ func (s *server) handlePatchFact(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	fact, err := s.records.GetFact(r.Context(), id)
+	fact, err := s.records.GetFact(r.Context(), characterID, id)
 	if err != nil {
 		recordError(w, err)
 		return
@@ -119,7 +146,11 @@ func (s *server) handleFactHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	chain, err := s.records.FactHistory(r.Context(), id)
+	characterID, ok := s.memoryCharacter(w, r)
+	if !ok {
+		return
+	}
+	chain, err := s.records.FactHistory(r.Context(), characterID, id)
 	if err != nil {
 		recordError(w, err)
 		return
@@ -138,6 +169,10 @@ func (s *server) handleForgetFact(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	characterID, ok := s.memoryCharacter(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
 		Confirm bool `json:"confirm"`
 	}
@@ -149,17 +184,17 @@ func (s *server) handleForgetFact(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "confirm=true is required", http.StatusBadRequest)
 		return
 	}
-	fact, err := s.records.GetFact(r.Context(), id)
+	fact, err := s.records.GetFact(r.Context(), characterID, id)
 	if err != nil {
 		recordError(w, err)
 		return
 	}
-	if err := s.records.ForgetFact(r.Context(), id, s.clock()); err != nil {
+	if err := s.records.ForgetFact(r.Context(), characterID, id, s.clock()); err != nil {
 		recordError(w, err)
 		return
 	}
 	if fact.SourceMessageID != nil {
-		if err := s.records.ForgetMessage(r.Context(), *fact.SourceMessageID); err != nil && !errors.Is(err, store.ErrNotFound) {
+		if err := s.records.ForgetMessage(r.Context(), characterID, *fact.SourceMessageID); err != nil && !errors.Is(err, store.ErrNotFound) {
 			serverError(w, "hide source message", err)
 			return
 		}
@@ -168,6 +203,10 @@ func (s *server) handleForgetFact(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
+	characterID, ok := s.memoryCharacter(w, r)
+	if !ok {
+		return
+	}
 	q := r.URL.Query()
 	text := strings.TrimSpace(q.Get("q"))
 	if text == "" {
@@ -200,13 +239,13 @@ func (s *server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hits, err := s.records.SearchMessages(r.Context(), store.MessageQuery{
-		Text: text, From: from, To: to, TZ: settings.TZ, Limit: limit,
+		CharacterID: characterID, Text: text, From: from, To: to, TZ: settings.TZ, Limit: limit,
 	})
 	if err != nil {
 		serverError(w, "search messages", err)
 		return
 	}
-	facts, err := s.records.SearchFacts(r.Context(), store.FactQuery{Text: text, From: from, To: to, Limit: limit})
+	facts, err := s.records.SearchFacts(r.Context(), store.FactQuery{CharacterID: characterID, Text: text, From: from, To: to, Limit: limit})
 	if err != nil {
 		serverError(w, "search facts", err)
 		return
@@ -234,7 +273,11 @@ func (s *server) handleForgetMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.records.ForgetMessage(r.Context(), id); err != nil {
+	characterID, ok := s.memoryCharacter(w, r)
+	if !ok {
+		return
+	}
+	if err := s.records.ForgetMessage(r.Context(), characterID, id); err != nil {
 		recordError(w, err)
 		return
 	}
@@ -242,6 +285,10 @@ func (s *server) handleForgetMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleForgetDay(w http.ResponseWriter, r *http.Request) {
+	characterID, ok := s.memoryCharacter(w, r)
+	if !ok {
+		return
+	}
 	settings := s.settings(r.Context())
 	day, err := tools.ParseDay(r.PathValue("day"), assistant.LogicalDay(s.clock(), settings.Loc, settings.DayStartsAt))
 	if err != nil {
@@ -250,7 +297,7 @@ func (s *server) handleForgetDay(w http.ResponseWriter, r *http.Request) {
 	}
 	from := assistant.At(day, settings.DayStartsAt, settings.Loc)
 	to := from.AddDate(0, 0, 1)
-	n, err := s.records.ForgetDay(r.Context(), day, from, to)
+	n, err := s.records.ForgetDay(r.Context(), characterID, day, from, to)
 	if err != nil {
 		serverError(w, "forget day", err)
 		return
@@ -318,7 +365,7 @@ func (s *server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 
 func factJSON(f store.Fact) map[string]any {
 	out := map[string]any{
-		"id": f.ID, "text": f.Text, "category": f.Category, "core": f.Core, "status": f.Status,
+		"id": f.ID, "characterId": f.CharacterID, "text": f.Text, "category": f.Category, "core": f.Core, "status": f.Status,
 		"sourceKind": f.SourceKind, "validFrom": store.DayString(f.ValidFrom),
 		"useCount": f.UseCount, "createdAt": f.CreatedAt,
 	}

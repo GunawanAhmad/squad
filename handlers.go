@@ -246,7 +246,7 @@ func (s *server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		ConversationID: conv.ID,
 		Character: assistant.Character{
 			ID: c.ID, Name: c.Name, Provider: provider, Model: model, Persona: c.Persona, Tools: c.Tools,
-			Daily: c.ID == assistantCharacterID,
+			Context: c.Context, Daily: c.ID == assistantCharacterID,
 		},
 		Input: req.Content,
 		Model: model,

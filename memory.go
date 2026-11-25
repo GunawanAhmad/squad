@@ -81,7 +81,9 @@ func importMemoryFacts(ctx context.Context, db *store.Store, dir string) (int, e
 			})
 		}
 	}
-	n, err := db.ImportFacts(ctx, facts)
+	// The old memory/*.json notes are the assistant's: personas never had
+	// their own files and must not inherit the assistant's facts.
+	n, err := db.ImportFacts(ctx, assistantCharacterID, facts)
 	if err != nil {
 		return n, err
 	}

@@ -42,7 +42,7 @@ func TestImportMemoryFacts(t *testing.T) {
 	if err != nil || n != 3 {
 		t.Fatalf("import: %d, %v", n, err)
 	}
-	facts, err := db.Facts(context.Background(), store.FactFilter{Status: []string{"active"}})
+	facts, err := db.Facts(context.Background(), "assistant", store.FactFilter{Status: []string{"active"}})
 	if err != nil || len(facts) != 3 {
 		t.Fatalf("facts: %+v, %v", facts, err)
 	}
@@ -58,7 +58,7 @@ func TestImportMemoryFacts(t *testing.T) {
 	}
 	// Editing an imported note must not resurrect the old text either: the
 	// import is one shot, not a text-based merge on every boot.
-	before, _ := db.Facts(context.Background(), store.FactFilter{Status: []string{"active"}})
+	before, _ := db.Facts(context.Background(), "assistant", store.FactFilter{Status: []string{"active"}})
 	edited := before[0]
 	for _, f := range before {
 		if f.Text == "prefers short answers" {
@@ -72,7 +72,7 @@ func TestImportMemoryFacts(t *testing.T) {
 	if n, err := importMemoryFacts(context.Background(), db, dir); err != nil || n != 0 {
 		t.Fatalf("import after edit: %d, %v", n, err)
 	}
-	after, _ := db.Facts(context.Background(), store.FactFilter{Status: []string{"active"}})
+	after, _ := db.Facts(context.Background(), "assistant", store.FactFilter{Status: []string{"active"}})
 	if len(after) != 3 {
 		t.Fatalf("edited import changed the fact count: %+v", after)
 	}
@@ -117,5 +117,38 @@ func TestMemoryPromptRendersCoreFactsWithBudget(t *testing.T) {
 	}
 	if strings.Contains(long, "[40]") {
 		t.Fatalf("budget did not cut the list")
+	}
+}
+
+// Every character's always-in-prompt block is its own; only profile.md is shared.
+func TestCharacterMemoryIsPerAgent(t *testing.T) {
+	db := storetest.New(t)
+	ctx := context.Background()
+	if _, err := db.AddFact(ctx, store.Fact{CharacterID: "assistant", Text: "likes black coffee", Category: "preference", Core: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AddFact(ctx, store.Fact{CharacterID: "ria", Text: "is moving to Jakarta", Category: "circumstance", Core: true}); err != nil {
+		t.Fatal(err)
+	}
+	chars := map[string]Character{
+		"assistant": {ID: "assistant", Context: "memory"},
+		"ria":       {ID: "ria", Context: "memory"},
+		"mute":      {ID: "mute", Context: "none"},
+	}
+	memoryFor := characterMemory(chars, db)
+
+	assistantBlock := memoryFor("assistant")
+	if !strings.Contains(assistantBlock, "likes black coffee") || strings.Contains(assistantBlock, "Jakarta") {
+		t.Fatalf("assistant memory crossed owners:\n%s", assistantBlock)
+	}
+	riaBlock := memoryFor("ria")
+	if !strings.Contains(riaBlock, "Jakarta") || strings.Contains(riaBlock, "black coffee") {
+		t.Fatalf("ria memory crossed owners:\n%s", riaBlock)
+	}
+	if got := memoryFor("mute"); got != "" {
+		t.Fatalf("context none still has memory: %q", got)
+	}
+	if got := memoryFor("nobody"); got != "" {
+		t.Fatalf("unknown character has memory: %q", got)
 	}
 }

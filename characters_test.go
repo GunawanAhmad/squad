@@ -50,7 +50,8 @@ func TestCharactersConfigRejectsBadTools(t *testing.T) {
 	base := func() []Character {
 		return []Character{
 			{ID: "assistant", Name: "A", Model: "m", Tools: []string{"plan_tasks"}},
-			{ID: "ria", Name: "R", Model: "m", Tools: []string{"web_search"}},
+			// Personas may read the web and keep their own memory.
+			{ID: "ria", Name: "R", Model: "m", Context: "memory", Tools: []string{"web_search", "remember", "forget", "recall"}},
 		}
 	}
 	if err := validateCharacters(base(), tools.New()); err != nil {
@@ -61,6 +62,7 @@ func TestCharactersConfigRejectsBadTools(t *testing.T) {
 		"persona domain tool": func(l []Character) { l[1].Tools = append(l[1].Tools, "plan_tasks") },
 		"unknown tool":        func(l []Character) { l[1].Tools = []string{"nope"} },
 		"bad context":         func(l []Character) { l[1].Context = "everything" },
+		"old profile context": func(l []Character) { l[1].Context = "profile" },
 		"missing default":     func(l []Character) { l[1].Models = []string{"other"} },
 		"duplicate id":        func(l []Character) { l[1].ID = "assistant" },
 	}

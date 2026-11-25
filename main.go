@@ -33,18 +33,24 @@ type Character struct {
 	Model    string          `json:"model"`
 	Models   []string        `json:"models"` // optional picker choices (see choice); must include the default
 	Tools    []string        `json:"tools"`
-	// Context is how much of the private memory block this character may see:
-	// "profile" (default) or "none". Phase 2 adds the assistant's own facts here.
+	// Context is this character's own memory stack: "memory" (default) means
+	// profile.md plus its own core facts and pre-retrieval; "none" means none.
+	// Memory is never shared between characters.
 	Context string `json:"context"`
 }
 
 // The assistant is the one character with daily threads and domain tools.
 const assistantCharacterID = "assistant"
 
-// webTools are the only tools that read the outside world. The personas get
-// only these (they must not write the user's day). The assistant may use them
-// too; its turn loop refuses memory writes after a web read (D3).
+// webTools are the only tools that read the outside world. Personas get these
+// plus memoryTools (their own memory only); they never get the daily-domain
+// tools. The assistant may use them too; every character's turn loop refuses
+// memory writes after a web read (D3).
 var webTools = []string{"web_search", "fetch_url"}
+
+// memoryTools write and read the calling character's own facts. Personas get
+// them scoped to themselves by the store, never the assistant's.
+var memoryTools = []string{"remember", "forget", "recall"}
 
 var sessionIDRe = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 
@@ -108,26 +114,9 @@ func main() {
 			string(llm.OpenCodeProvider): openCodeModel(),
 			string(llm.ClaudeProvider):   claudeModel(),
 		},
-		DB:       db,
-		Embedder: embedder,
-		Memory: func(charID string) string {
-			if c, ok := chars[charID]; ok && c.Context == "none" {
-				return ""
-			}
-			// D9: personas keep the profile text only. Database facts can
-			// contain health/person details extracted from the assistant's
-			// threads and must not reach another character (or the Claude CLI).
-			if charID != assistantCharacterID {
-				return memoryPrompt(readProfile(), nil)
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			facts, err := db.CoreFacts(ctx, 100)
-			if err != nil {
-				log.Printf("memory: reading core facts: %v", err)
-			}
-			return memoryPrompt(readProfile(), facts)
-		},
+		DB:         db,
+		Embedder:   embedder,
+		Memory:     characterMemory(chars, db),
 		Settings:   func(ctx context.Context) assistant.Settings { return assistant.LoadSettings(ctx, db) },
 		Now:        assistant.Now,
 		Location:   assistant.TimeZone(),
@@ -144,7 +133,7 @@ func main() {
 			Store: db, Runner: runner, Now: assistant.Now,
 			Char: assistant.Character{
 				ID: c.ID, Name: c.Name, Provider: provider, Model: model,
-				Persona: c.Persona, Tools: c.Tools, Daily: true,
+				Persona: c.Persona, Tools: c.Tools, Context: c.Context, Daily: true,
 			},
 			Setting: func(ctx context.Context) assistant.Settings { return assistant.LoadSettings(ctx, db) },
 			Before:  func(ctx context.Context, now time.Time) { backup.Maybe(ctx, now) },
@@ -166,6 +155,25 @@ func main() {
 	log.Fatal(http.ListenAndServe(addr, mux))
 }
 
+// characterMemory is the always-in-prompt block for one agent: the shared
+// profile.md the user writes, plus that agent's own core facts. Context "none"
+// turns it off; another agent's facts are never part of it.
+func characterMemory(chars map[string]Character, db *store.Store) func(string) string {
+	return func(charID string) string {
+		c, ok := chars[charID]
+		if !ok || c.Context == "none" {
+			return ""
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		facts, err := db.CoreFacts(ctx, charID, 100)
+		if err != nil {
+			log.Printf("memory: reading core facts for %s: %v", charID, err)
+		}
+		return memoryPrompt(readProfile(), facts)
+	}
+}
+
 // validateCharacters keeps the config honest at startup: known tools, the
 // personas that cannot write the user's day,
 // a valid context setting, and a picker that includes the default model.
@@ -183,14 +191,16 @@ func validateCharacters(list []Character, reg *tools.Registry) error {
 			if !reg.Has(t) {
 				return fmt.Errorf("character %q: unknown tool %q", c.ID, t)
 			}
-			if c.ID != assistantCharacterID && !slices.Contains(webTools, t) {
+			// Personas may read the web and keep their own memory; they never
+			// get the daily-domain tools (that is the assistant's day).
+			if c.ID != assistantCharacterID && !slices.Contains(webTools, t) && !slices.Contains(memoryTools, t) {
 				return fmt.Errorf("character %q: personas get no domain tool %q", c.ID, t)
 			}
 		}
 		switch c.Context {
-		case "", "profile", "none":
+		case "", "memory", "none":
 		default:
-			return fmt.Errorf("character %q: context must be profile or none, not %q", c.ID, c.Context)
+			return fmt.Errorf("character %q: context must be memory or none, not %q", c.ID, c.Context)
 		}
 		if len(c.Models) > 0 && !slices.Contains(c.Models, choice(c.Provider, c.Model)) {
 			return fmt.Errorf("character %q: models must include %q", c.ID, choice(c.Provider, c.Model))

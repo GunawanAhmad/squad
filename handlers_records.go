@@ -369,7 +369,8 @@ func (s *server) handleUndo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad kind", http.StatusBadRequest)
 		return
 	}
-	summary, err := tools.ApplyUndo(r.Context(), s.records, req.ToolCallID, req.Kind, req.ID)
+	// The Today panel is the assistant's; the record tools exist only for it.
+	summary, err := tools.ApplyUndo(r.Context(), s.records, assistantCharacterID, req.ToolCallID, req.Kind, req.ID)
 	if err != nil {
 		recordError(w, err)
 		return
