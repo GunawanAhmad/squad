@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -226,5 +227,20 @@ func TestSummaryRollsUpOlderMessages(t *testing.T) {
 	system := reqs[len(reqs)-1].System
 	if !strings.Contains(system, "<summary>") || !strings.Contains(system, "API refactor") {
 		t.Fatalf("summary missing from context:\n%s", system)
+	}
+}
+
+func TestValidateCloseDocRejectsDuplicateSupersede(t *testing.T) {
+	facts := []store.Fact{{ID: 1, Text: "lives in Bali", Status: "active", Category: "circumstance"}}
+	raw := json.RawMessage(`{"facts":[
+		{"op":"SUPERSEDE","id":1,"text":"lives in Jakarta","category":"circumstance"},
+		{"op":"SUPERSEDE","id":1,"text":"lives in Bandung","category":"circumstance"}
+	]}`)
+	ops, rejects := validateCloseDoc(raw, facts)
+	if len(ops) != 1 || ops[0].Text != "lives in Jakarta" {
+		t.Fatalf("ops: %+v", ops)
+	}
+	if len(rejects) != 1 || !strings.Contains(rejects[0], "inactive") {
+		t.Fatalf("rejects: %+v", rejects)
 	}
 }

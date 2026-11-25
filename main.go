@@ -104,6 +104,12 @@ func main() {
 			if c, ok := chars[charID]; ok && c.Context == "none" {
 				return ""
 			}
+			// D9: personas keep the profile text only. Database facts can
+			// contain health/person details extracted from the assistant's
+			// threads and must not reach another character (or the Claude CLI).
+			if charID != assistantCharacterID {
+				return memoryPrompt(readProfile(), nil)
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			facts, err := db.CoreFacts(ctx, 100)

@@ -137,6 +137,15 @@ func rememberTool() *Tool {
 			if err := json.Unmarshal([]byte(raw), &args); err != nil {
 				return Result{}, fmt.Errorf("bad arguments: %w", err)
 			}
+			// Resolve the old fact before inserting the new one: otherwise the
+			// new row can match its own supersedes reference (or make it
+			// ambiguous) and leave no active fact behind.
+			var old store.Fact
+			var candidates []store.Fact
+			var resolveErr error
+			if strings.TrimSpace(args.Supersedes) != "" {
+				old, candidates, resolveErr = ResolveFact(ctx, env.DB, args.Supersedes)
+			}
 			fact, err := AddFact(ctx, env.DB, args.Text, args.Category, args.Core, "tool", env.SourceMessageID, recordToday(env), nil)
 			if err != nil {
 				if errors.Is(err, ErrConflict) {
@@ -148,11 +157,10 @@ func rememberTool() *Tool {
 			var undo []UndoOp
 			summary := "remembered: " + FactLine(fact)
 			if strings.TrimSpace(args.Supersedes) != "" {
-				old, candidates, err := ResolveFact(ctx, env.DB, args.Supersedes)
 				switch {
-				case err != nil:
+				case resolveErr != nil:
 					// The new fact stands; the old one was not found.
-					summary += fmt.Sprintf(" (could not supersede %q: %v)", args.Supersedes, err)
+					summary += fmt.Sprintf(" (could not supersede %q: %v)", args.Supersedes, resolveErr)
 				case len(candidates) > 0:
 					var lines []string
 					for _, c := range candidates {

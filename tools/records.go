@@ -522,6 +522,13 @@ func ApplyUndo(ctx context.Context, db *store.Store, toolCallID int64, targetKin
 	for _, op := range selected {
 		summary, err := applyUndoOp(ctx, db, op)
 		if err != nil {
+			// Keep the ops that already succeeded out of the stored record so
+			// a retry does not try to apply them a second time and conflict.
+			if len(summaries) > 0 {
+				if raw, mErr := json.Marshal(remaining); mErr == nil {
+					_ = db.FinishToolCall(context.WithoutCancel(ctx), toolCallID, tc.Result, raw, "ok")
+				}
+			}
 			return "", err
 		}
 		summaries = append(summaries, summary)

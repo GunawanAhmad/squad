@@ -2,6 +2,8 @@ package assistant
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,12 +14,18 @@ import (
 type fakeEmbedder struct {
 	model string
 	calls int
+	bad   string // any batch containing this text fails
 }
 
 func (f *fakeEmbedder) Model() string { return f.model }
 func (f *fakeEmbedder) Dims() int     { return 1024 }
 func (f *fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
 	f.calls++
+	for _, t := range texts {
+		if f.bad != "" && strings.Contains(t, f.bad) {
+			return nil, fmt.Errorf("rejected: %s", f.bad)
+		}
+	}
 	out := make([][]float32, len(texts))
 	for i := range texts {
 		v := make([]float32, 1024)
@@ -66,4 +74,26 @@ func TestEmbedWorkerOnce(t *testing.T) {
 	}
 	_ = long
 	_ = fact
+}
+
+func TestEmbedWorkerSkipsBadRow(t *testing.T) {
+	db := storetest.New(t)
+	ctx := context.Background()
+	if _, err := db.CreateConversation(ctx, store.Conversation{ID: "c", CharacterID: "assistant"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AddMessage(ctx, store.Message{ConversationID: "c", Role: "user", Content: "a good message long enough to embed"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AddMessage(ctx, store.Message{ConversationID: "c", Role: "user", Content: "a bad message long enough to embed"}); err != nil {
+		t.Fatal(err)
+	}
+	emb := &fakeEmbedder{model: "fake", bad: "bad message"}
+	n, err := (&EmbedWorker{Store: db, Embedder: emb}).Once(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("once: %d, %v", n, err)
+	}
+	if m, _, err := db.EmbeddedCounts(ctx, "fake"); err != nil || m != 1 {
+		t.Fatalf("counts: %d, %v", m, err)
+	}
 }

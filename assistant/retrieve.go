@@ -81,7 +81,7 @@ func Retrieve(ctx context.Context, s Searcher, query string, loc *time.Location,
 		}
 		who := h.CharacterID
 		if h.Role == "user" {
-			who = "you"
+			who = "you (to " + h.CharacterID + ")"
 		}
 		out = append(out, Retrieved{Kind: "message", ID: h.ID, When: when, Who: who, Text: clip(h.Content, maxItemRunes)})
 	}
@@ -94,6 +94,10 @@ func Retrieve(ctx context.Context, s Searcher, query string, loc *time.Location,
 	}
 	var ids []int64
 	for _, f := range facts {
+		// Core facts already sit in <memory>; repeating them wastes the budget.
+		if f.Core {
+			continue
+		}
 		out = append(out, Retrieved{Kind: "fact", ID: f.ID, When: store.DayString(f.ValidFrom), Who: f.Category, Text: clip(f.Text, maxItemRunes)})
 		ids = append(ids, f.ID)
 	}

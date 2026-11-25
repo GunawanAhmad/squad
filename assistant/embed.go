@@ -47,7 +47,8 @@ func (w *EmbedWorker) Run(ctx context.Context) {
 	}
 }
 
-// Once embeds one batch of pending messages and facts.
+// Once embeds one batch of pending messages and facts. A bad row is logged and
+// skipped; it must not stop the rest of the batch, the facts, or the next pass.
 func (w *EmbedWorker) Once(ctx context.Context) (int, error) {
 	if w.Store == nil || w.Embedder == nil {
 		return 0, nil
@@ -62,7 +63,7 @@ func (w *EmbedWorker) Once(ctx context.Context) (int, error) {
 	}
 	done := 0
 
-	embeddings := func(rows []store.EmbedRow, set func(id int64, vec []float32) error) (int, error) {
+	embeddings := func(rows []store.EmbedRow, set func(r store.EmbedRow, vec []float32) error) int {
 		n := 0
 		for start := 0; start < len(rows) && n < perRun; start += batch {
 			end := start + batch
@@ -74,37 +75,51 @@ func (w *EmbedWorker) Once(ctx context.Context) (int, error) {
 				texts = append(texts, clip(r.Content, maxEmbedRunes))
 			}
 			vecs, err := w.Embedder.Embed(ctx, texts)
-			if err != nil {
-				return n, err
+			if err == nil {
+				for i, r := range rows[start:end] {
+					if i >= len(vecs) {
+						break
+					}
+					if err := set(r, vecs[i]); err != nil {
+						log.Printf("embeddings: row %d: %v", r.ID, err)
+						continue
+					}
+					n++
+				}
+				continue
 			}
-			for i, r := range rows[start:end] {
-				if err := set(r.ID, vecs[i]); err != nil {
-					return n, err
+			// One bad text must not block the whole batch (and the same rows
+			// would be picked again next time). Retry each row alone.
+			for _, r := range rows[start:end] {
+				v, e := w.Embedder.Embed(ctx, []string{clip(r.Content, maxEmbedRunes)})
+				if e != nil || len(v) != 1 {
+					log.Printf("embeddings: row %d: %v", r.ID, e)
+					continue
+				}
+				if err := set(r, v[0]); err != nil {
+					log.Printf("embeddings: row %d: %v", r.ID, err)
+					continue
 				}
 				n++
 			}
 		}
-		return n, nil
+		return n
 	}
 
 	msgs, err := w.Store.UnembeddedMessages(ctx, perRun)
 	if err != nil {
 		return done, err
 	}
-	n, err := embeddings(msgs, func(id int64, vec []float32) error {
-		return w.Store.SetMessageEmbedding(ctx, id, vec, w.Embedder.Model())
+	done += embeddings(msgs, func(r store.EmbedRow, vec []float32) error {
+		return w.Store.SetMessageEmbedding(ctx, r.ID, vec, w.Embedder.Model())
 	})
-	done += n
-	if err != nil {
-		return done, err
-	}
 
 	facts, err := w.Store.UnembeddedFacts(ctx, perRun)
 	if err != nil {
 		return done, err
 	}
-	n, err = embeddings(facts, func(id int64, vec []float32) error {
-		return w.Store.SetFactEmbedding(ctx, id, vec, w.Embedder.Model())
+	done += embeddings(facts, func(r store.EmbedRow, vec []float32) error {
+		return w.Store.SetFactEmbedding(ctx, r.ID, r.Content, vec, w.Embedder.Model())
 	})
-	return done + n, err
+	return done, nil
 }

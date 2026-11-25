@@ -103,6 +103,20 @@ func (e *Engine) ExecuteJobs(ctx context.Context, plan Plan) {
 
 // closeDay extracts durable facts from one finished day and applies them.
 func (e *Engine) closeDay(ctx context.Context, day time.Time, set Settings) {
+	// A plan may have been made while another poll was already running this
+	// day. Re-read the row now that the jobs lock is held; a finished or
+	// exhausted day must not be extracted twice.
+	if c, err := e.Store.Checkin(ctx, day, "close"); err == nil {
+		if c.Status == "sent" || c.Status == "skipped" {
+			return
+		}
+		if c.Status == "failed" && c.Attempts >= maxAttempts {
+			return
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		log.Printf("close %s: checking status: %v", store.DayString(day), err)
+		return
+	}
 	model, modelID, err := e.jobsModel(ctx)
 	if err != nil {
 		log.Printf("close %s: %v", store.DayString(day), err)
@@ -297,6 +311,9 @@ func validateCloseDoc(raw json.RawMessage, existing []store.Fact) ([]store.FactO
 		}
 		ops = append(ops, store.FactOp{Op: op, ID: item.ID, Text: text, Category: category, Core: item.Core})
 		byText[strings.ToLower(text)] = true
+		if op == "SUPERSEDE" {
+			delete(byID, item.ID) // a second supersede of the same row is invalid
+		}
 	}
 	return ops, rejects
 }
@@ -313,7 +330,7 @@ func (e *Engine) summaryNeeded(ctx context.Context, day time.Time, set Settings)
 	}
 	fresh := 0
 	for _, m := range msgs {
-		if m.Role != "user" && m.Role != "assistant" {
+		if m.Role != "user" && m.Role != "assistant" || m.ForgottenAt != nil {
 			continue
 		}
 		if conv.SummaryUpto != nil && m.ID <= *conv.SummaryUpto {
@@ -351,7 +368,8 @@ func (e *Engine) maybeSummarize(ctx context.Context, set Settings) {
 	}
 	var fresh []store.Message
 	for _, m := range msgs {
-		if (m.Role == "user" || m.Role == "assistant") && (conv.SummaryUpto == nil || m.ID > *conv.SummaryUpto) {
+		if m.ForgottenAt == nil && (m.Role == "user" || m.Role == "assistant") &&
+			(conv.SummaryUpto == nil || m.ID > *conv.SummaryUpto) {
 			fresh = append(fresh, m)
 		}
 	}
@@ -374,6 +392,7 @@ func (e *Engine) maybeSummarize(ctx context.Context, set Settings) {
 		b.WriteString("Existing summary:\n" + conv.Summary + "\n\n")
 	}
 	used := 0
+	var lastID int64
 	for _, m := range older {
 		line := fmt.Sprintf("%s: %s\n", m.Role, clip(m.Content, 600))
 		if used+len(line) > 12000 {
@@ -381,6 +400,10 @@ func (e *Engine) maybeSummarize(ctx context.Context, set Settings) {
 		}
 		b.WriteString(line)
 		used += len(line)
+		lastID = m.ID
+	}
+	if lastID == 0 {
+		return
 	}
 
 	runID, err := e.Store.StartRun(ctx, store.Run{
@@ -412,7 +435,7 @@ func (e *Engine) maybeSummarize(ctx context.Context, set Settings) {
 		_ = e.Store.FinishRun(context.WithoutCancel(ctx), runID, StatusError, msg, in, out)
 		return
 	}
-	if err := e.Store.SetSummary(ctx, convID, summary, older[len(older)-1].ID); err != nil {
+	if err := e.Store.SetSummary(ctx, convID, summary, lastID); err != nil {
 		_ = e.Store.FinishRun(context.WithoutCancel(ctx), runID, StatusError, err.Error(), in, out)
 		return
 	}

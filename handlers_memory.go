@@ -248,7 +248,7 @@ func (s *server) handleForgetDay(w http.ResponseWriter, r *http.Request) {
 		recordError(w, err)
 		return
 	}
-	from := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, settings.Loc)
+	from := assistant.At(day, settings.DayStartsAt, settings.Loc)
 	to := from.AddDate(0, 0, 1)
 	n, err := s.records.ForgetDay(r.Context(), day, from, to)
 	if err != nil {

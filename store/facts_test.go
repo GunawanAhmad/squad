@@ -183,3 +183,102 @@ func TestForgetDay(t *testing.T) {
 		}
 	}
 }
+
+func TestImportDoesNotResurrectForgottenFact(t *testing.T) {
+	s := storetest.New(t)
+	ctx := context.Background()
+	facts := []store.Fact{{Text: "a note I will delete", Category: "general"}}
+	if n, err := s.ImportFacts(ctx, facts); err != nil || n != 1 {
+		t.Fatalf("import: %d, %v", n, err)
+	}
+	active, _ := s.Facts(ctx, store.FactFilter{Status: []string{"active"}})
+	if len(active) != 1 {
+		t.Fatalf("active: %+v", active)
+	}
+	if err := s.ForgetFact(ctx, active[0].ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// A restart imports the same file again; the forgotten note must stay gone.
+	if n, err := s.ImportFacts(ctx, facts); err != nil || n != 0 {
+		t.Fatalf("re-import: %d, %v", n, err)
+	}
+	if active, _ := s.Facts(ctx, store.FactFilter{Status: []string{"active"}}); len(active) != 0 {
+		t.Fatalf("forgotten imported fact came back: %+v", active)
+	}
+}
+
+func TestForgetClearsSummary(t *testing.T) {
+	s := storetest.New(t)
+	ctx := context.Background()
+	d := day(2026, 11, 1)
+	if _, err := s.CreateConversation(ctx, store.Conversation{ID: "daily:2026-11-01", CharacterID: "assistant", Day: &d}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.AddMessage(ctx, store.Message{ConversationID: "daily:2026-11-01", Role: "user", Content: "a private detail"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSummary(ctx, "daily:2026-11-01", "summary quoting a private detail", m.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ForgetMessage(ctx, m.ID); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.GetConversation(ctx, "daily:2026-11-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Summary != "" || c.SummaryUpto != nil {
+		t.Fatalf("summary survived a forget: %q, %v", c.Summary, c.SummaryUpto)
+	}
+}
+
+func TestUpdateFactClearsItsEmbedding(t *testing.T) {
+	s := storetest.New(t)
+	ctx := context.Background()
+	f, err := s.AddFact(ctx, store.Fact{Text: "lives in Bali", Category: "circumstance", ValidFrom: day(2026, 1, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetFactEmbedding(ctx, f.ID, f.Text, unit(0), "fake"); err != nil {
+		t.Fatal(err)
+	}
+	f, _ = s.GetFact(ctx, f.ID)
+	f.Text = "lives in Jakarta"
+	if _, err := s.UpdateFact(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := s.UnembeddedFacts(ctx, 10)
+	if len(pending) != 1 || pending[0].ID != f.ID {
+		t.Fatalf("edited fact not pending: %+v", pending)
+	}
+	// A worker that read the old text before the edit must not write a stale
+	// vector back.
+	if err := s.SetFactEmbedding(ctx, f.ID, "lives in Bali", unit(1), "fake"); err != nil {
+		t.Fatal(err)
+	}
+	if pending, _ := s.UnembeddedFacts(ctx, 10); len(pending) != 1 {
+		t.Fatalf("stale vector written: %+v", pending)
+	}
+}
+
+func TestSetMessageEmbeddingSkipsForgotten(t *testing.T) {
+	s := storetest.New(t)
+	ctx := context.Background()
+	if _, err := s.CreateConversation(ctx, store.Conversation{ID: "c", CharacterID: "assistant"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.AddMessage(ctx, store.Message{ConversationID: "c", Role: "user", Content: "a message long enough to be embedded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ForgetMessage(ctx, m.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMessageEmbedding(ctx, m.ID, unit(0), "fake"); err != nil {
+		t.Fatal(err)
+	}
+	if n, _, err := s.EmbeddedCounts(ctx, "fake"); err != nil || n != 0 {
+		t.Fatalf("forgotten message got an embedding: %d, %v", n, err)
+	}
+}

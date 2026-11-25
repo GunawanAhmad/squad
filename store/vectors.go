@@ -61,15 +61,19 @@ func scanEmbedRows(rows interface {
 
 func (s *Store) SetMessageEmbedding(ctx context.Context, id int64, vec []float32, model string) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE messages SET embedding = $2::vector, embedding_model = $3 WHERE id = $1`,
+		UPDATE messages SET embedding = $2::vector, embedding_model = $3
+		WHERE id = $1 AND forgotten_at IS NULL`,
 		id, FormatVector(vec), model)
 	return err
 }
 
-func (s *Store) SetFactEmbedding(ctx context.Context, id int64, vec []float32, model string) error {
+// SetFactEmbedding writes a vector only while the fact still has the text it
+// was embedded from, so an edit racing the worker cannot store a stale vector.
+func (s *Store) SetFactEmbedding(ctx context.Context, id int64, text string, vec []float32, model string) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE facts SET embedding = $2::vector, embedding_model = $3 WHERE id = $1`,
-		id, FormatVector(vec), model)
+		UPDATE facts SET embedding = $3::vector, embedding_model = $4
+		WHERE id = $1 AND text = $2`,
+		id, text, FormatVector(vec), model)
 	return err
 }
 

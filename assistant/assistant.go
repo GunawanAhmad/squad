@@ -206,7 +206,7 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 		records = &loaded
 	}
 	var retrieved []Retrieved
-	if searcher, ok := r.store.(Searcher); ok && req.Character.Daily {
+	if searcher, ok := r.store.(Searcher); ok && req.Character.Daily && req.Role != "trigger" {
 		tz := set.TZ
 		if tz == "" && set.Loc != nil {
 			tz = set.Loc.String()
@@ -340,7 +340,7 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 			env.ToolCallID = call.ID
 			var res tools.Result
 			var toolErr error
-			if webRead && (tc.Name == "remember" || tc.Name == "forget") {
+			if webRead && (tc.Name == "remember" || tc.Name == "forget" || tc.Name == "undo") {
 				// D3: web content must never reach memory directly. The user can say it in their next message.
 				toolErr = errors.New("refused: memory can't change in the same turn as reading the web; ask the user to confirm it in their own message")
 			} else {

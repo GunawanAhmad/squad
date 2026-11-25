@@ -81,7 +81,7 @@ func TestEmbeddingColumnsAndHybridSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetFactEmbedding(ctx, fact.ID, unit(2), "fake"); err != nil {
+	if err := s.SetFactEmbedding(ctx, fact.ID, fact.Text, unit(2), "fake"); err != nil {
 		t.Fatal(err)
 	}
 	if m, f, err := s.EmbeddedCounts(ctx, "fake"); err != nil || m != 2 || f != 1 {

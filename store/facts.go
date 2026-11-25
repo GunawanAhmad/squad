@@ -140,7 +140,10 @@ func (s *Store) Facts(ctx context.Context, f FactFilter) ([]Fact, error) {
 // validity) and bumps updated_at. It never removes a row.
 func (s *Store) UpdateFact(ctx context.Context, f Fact) (Fact, error) {
 	row := s.pool.QueryRow(ctx, `
-		UPDATE facts SET text = $2, category = $3, core = $4, status = $5,
+		UPDATE facts SET
+			embedding = CASE WHEN text IS DISTINCT FROM $2 THEN NULL ELSE embedding END,
+			embedding_model = CASE WHEN text IS DISTINCT FROM $2 THEN NULL ELSE embedding_model END,
+			text = $2, category = $3, core = $4, status = $5,
 			valid_from = $6, valid_to = $7, superseded_by = $8, updated_at = now()
 		WHERE id = $1
 		RETURNING `+factCols,
@@ -205,7 +208,12 @@ func (s *Store) ForgetMessage(ctx context.Context, id int64) error {
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	// A stored summary may quote the message; drop it so it cannot come back
+	// through the next turn. It is regenerated from the remaining messages.
+	_, err = s.pool.Exec(ctx, `
+		UPDATE conversations SET summary = NULL, summary_upto = NULL
+		WHERE id = (SELECT conversation_id FROM messages WHERE id = $1)`, id)
+	return err
 }
 
 // ForgetDay hides every non-forgotten message the user sent or received on a
@@ -216,6 +224,17 @@ func (s *Store) ForgetDay(ctx context.Context, day time.Time, from, to time.Time
 		FROM conversations c
 		WHERE m.conversation_id = c.id AND m.forgotten_at IS NULL
 		  AND ((c.day = $1) OR (c.day IS NULL AND m.created_at >= $2 AND m.created_at < $3))`,
+		Day(day), from, to)
+	if err != nil {
+		return 0, err
+	}
+	// Drop summaries that may quote a message from this day; the next turn
+	// regenerates them from what is left.
+	_, err = s.pool.Exec(ctx, `
+		UPDATE conversations c SET summary = NULL, summary_upto = NULL
+		WHERE (c.day = $1) OR (c.day IS NULL AND EXISTS (
+			SELECT 1 FROM messages m
+			WHERE m.conversation_id = c.id AND m.created_at >= $2 AND m.created_at < $3))`,
 		Day(day), from, to)
 	if err != nil {
 		return 0, err
@@ -301,7 +320,7 @@ func (s *Store) searchMessagesKeyword(ctx context.Context, q MessageQuery) ([]Me
 	if limit <= 0 || limit > 50 {
 		limit = 10
 	}
-	where := `m.forgotten_at IS NULL AND m.search @@ websearch_to_tsquery('simple', $1)`
+	where := `m.forgotten_at IS NULL AND m.role IN ('user','assistant') AND m.search @@ websearch_to_tsquery('simple', $1)`
 	if q.From != nil || q.To != nil {
 		tz := q.TZ
 		if tz == "" {
@@ -439,7 +458,7 @@ func (s *Store) ImportFacts(ctx context.Context, facts []Fact) (int, error) {
 			INSERT INTO facts (text, category, core, source_kind, valid_from)
 			SELECT $1, $2, $3, 'user', $4
 			WHERE NOT EXISTS (
-				SELECT 1 FROM facts WHERE lower(text) = lower($1) AND status = 'active'
+				SELECT 1 FROM facts WHERE lower(text) = lower($1)
 			)`, text, f.Category, f.Core, Day(f.ValidFrom))
 		if err != nil {
 			return imported, err
