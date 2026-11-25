@@ -52,13 +52,14 @@ type RecordsStore interface {
 	Activities(ctx context.Context, f store.ActivityFilter) ([]store.Activity, error)
 	Reminders(ctx context.Context, f store.ReminderFilter) ([]store.Reminder, error)
 	Projects(ctx context.Context) ([]store.Project, error)
-	NotedFacts(ctx context.Context, since time.Time, limit int) ([]store.Fact, error)
+	NotedFacts(ctx context.Context, characterID string, since time.Time, limit int) ([]store.Fact, error)
 }
 
-// LoadRecords reads one turn's (or one check-in's) records. A failure returns
-// an empty section rather than failing the turn: a chat without context beats
-// no chat.
-func LoadRecords(ctx context.Context, rs RecordsStore, day time.Time, set Settings) Records {
+// LoadRecords reads one turn's (or one check-in's) records for one character.
+// A failure returns an empty section rather than failing the turn: a chat
+// without context beats no chat. In practice only the assistant has a daily
+// thread, so today's records are its own; "I noted" is its own facts too.
+func LoadRecords(ctx context.Context, rs RecordsStore, characterID string, day time.Time, set Settings) Records {
 	rec := Records{Day: store.Day(day)}
 	dayStart := At(rec.Day, set.DayStartsAt, set.Loc)
 	nextStart := At(rec.Day.AddDate(0, 0, 1), set.DayStartsAt, set.Loc)
@@ -103,7 +104,7 @@ func LoadRecords(ctx context.Context, rs RecordsStore, day time.Time, set Settin
 		}
 	}
 
-	if noted, err := rs.NotedFacts(ctx, dayStart, 8); err == nil {
+	if noted, err := rs.NotedFacts(ctx, characterID, dayStart, 8); err == nil {
 		rec.NotedFacts = noted
 	}
 

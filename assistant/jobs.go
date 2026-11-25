@@ -50,32 +50,52 @@ func (j *jobState) release() {
 	j.busy = false
 }
 
-// closeJobs claims the past days that still need closing. Claiming is a
-// checkins row with kind 'close', so two polls cannot close a day twice.
-func (e *Engine) closeJobs(ctx context.Context, today time.Time, set Settings) ([]time.Time, error) {
-	var days []time.Time
-	for i := 1; i <= closeLookback && len(days) < closePerPass; i++ {
+// CloseJob is one (day, character) pair whose facts still need extracting. The
+// day-close job runs per owner, so one character's failure never re-applies or
+// blocks another's.
+type CloseJob struct {
+	Day         time.Time
+	CharacterID string
+}
+
+// closeJobs claims the past (day, character) pairs that still need closing.
+// Claiming is a checkins row keyed by (day, kind, character_id), so two polls
+// cannot close the same pair twice and a failed character retries alone.
+func (e *Engine) closeJobs(ctx context.Context, today time.Time, set Settings) ([]CloseJob, error) {
+	var jobs []CloseJob
+	for i := 1; i <= closeLookback && len(jobs) < closePerPass; i++ {
 		day := today.AddDate(0, 0, -i)
-		c, err := e.Store.Checkin(ctx, day, "close")
-		switch {
-		case err == nil:
-			retryable := c.Status == "pending" || (c.Status == "failed" && c.Attempts < maxAttempts)
-			if retryable {
-				days = append(days, day)
-			}
-			continue
-		case err != nil && !errors.Is(err, store.ErrNotFound):
-			return days, err
-		}
-		claimed, err := e.Store.ClaimCheckin(ctx, day, "close")
+		from := At(day, set.DayStartsAt, set.Loc)
+		to := At(day.AddDate(0, 0, 1), set.DayStartsAt, set.Loc)
+		chars, err := e.Store.DayCharacters(ctx, day, from, to)
 		if err != nil {
-			return days, err
+			return jobs, err
 		}
-		if claimed {
-			days = append(days, day)
+		for _, characterID := range chars {
+			if len(jobs) >= closePerPass {
+				break
+			}
+			c, err := e.Store.Checkin(ctx, day, "close", characterID)
+			switch {
+			case err == nil:
+				retryable := c.Status == "pending" || (c.Status == "failed" && c.Attempts < maxAttempts)
+				if retryable {
+					jobs = append(jobs, CloseJob{Day: day, CharacterID: characterID})
+				}
+				continue
+			case err != nil && !errors.Is(err, store.ErrNotFound):
+				return jobs, err
+			}
+			claimed, err := e.Store.ClaimCheckin(ctx, day, "close", characterID)
+			if err != nil {
+				return jobs, err
+			}
+			if claimed {
+				jobs = append(jobs, CloseJob{Day: day, CharacterID: characterID})
+			}
 		}
 	}
-	return days, nil
+	return jobs, nil
 }
 
 // ExecuteJobs runs the close jobs and the rolling summary in the background.
@@ -93,20 +113,22 @@ func (e *Engine) ExecuteJobs(ctx context.Context, plan Plan) {
 	defer e.jobs.release()
 
 	set := e.settings(ctx)
-	for _, day := range plan.Close {
-		e.closeDay(ctx, day, set)
+	for _, job := range plan.Close {
+		e.closeDay(ctx, job, set)
 	}
 	if plan.Summary {
 		e.maybeSummarize(ctx, set)
 	}
 }
 
-// closeDay extracts durable facts from one finished day and applies them.
-func (e *Engine) closeDay(ctx context.Context, day time.Time, set Settings) {
+// closeDay extracts durable facts from one character's finished day and applies
+// them to that character only.
+func (e *Engine) closeDay(ctx context.Context, job CloseJob, set Settings) {
+	day, characterID := job.Day, job.CharacterID
 	// A plan may have been made while another poll was already running this
-	// day. Re-read the row now that the jobs lock is held; a finished or
-	// exhausted day must not be extracted twice.
-	if c, err := e.Store.Checkin(ctx, day, "close"); err == nil {
+	// pair. Re-read the row now that the jobs lock is held; a finished or
+	// exhausted pair must not be extracted twice.
+	if c, err := e.Store.Checkin(ctx, day, "close", characterID); err == nil {
 		if c.Status == "sent" || c.Status == "skipped" {
 			return
 		}
@@ -114,44 +136,44 @@ func (e *Engine) closeDay(ctx context.Context, day time.Time, set Settings) {
 			return
 		}
 	} else if !errors.Is(err, store.ErrNotFound) {
-		log.Printf("close %s: checking status: %v", store.DayString(day), err)
+		log.Printf("close %s/%s: checking status: %v", store.DayString(day), characterID, err)
 		return
 	}
 	model, modelID, err := e.jobsModel(ctx)
 	if err != nil {
-		log.Printf("close %s: %v", store.DayString(day), err)
-		e.failClose(ctx, day)
+		log.Printf("close %s/%s: %v", store.DayString(day), characterID, err)
+		e.failClose(ctx, job)
 		return
 	}
 	dayStart := At(day, set.DayStartsAt, set.Loc)
 	nextStart := At(day.AddDate(0, 0, 1), set.DayStartsAt, set.Loc)
 
-	msgs, err := e.Store.DayMessages(ctx, day, dayStart, nextStart)
+	msgs, err := e.Store.DayMessages(ctx, characterID, day, dayStart, nextStart)
 	if err != nil {
-		log.Printf("close %s: reading messages: %v", store.DayString(day), err)
-		e.failClose(ctx, day)
+		log.Printf("close %s/%s: reading messages: %v", store.DayString(day), characterID, err)
+		e.failClose(ctx, job)
 		return
 	}
 	if len(msgs) == 0 {
-		// Nothing was said; the day is closed with nothing extracted.
-		if err := e.Store.FinishCheckin(ctx, day, "close", "sent", nil, nil); err != nil {
-			log.Printf("close %s: marking empty day: %v", store.DayString(day), err)
+		// Nothing was said; the pair is closed with nothing extracted.
+		if err := e.Store.FinishCheckin(ctx, day, "close", characterID, "sent", nil, nil); err != nil {
+			log.Printf("close %s/%s: marking empty day: %v", store.DayString(day), characterID, err)
 		}
 		return
 	}
-	facts, err := e.Store.Facts(ctx, store.FactFilter{Status: []string{"active"}, Limit: maxCloseFacts})
+	facts, err := e.Store.Facts(ctx, characterID, store.FactFilter{Status: []string{"active"}, Limit: maxCloseFacts})
 	if err != nil {
-		log.Printf("close %s: reading facts: %v", store.DayString(day), err)
-		e.failClose(ctx, day)
+		log.Printf("close %s/%s: reading facts: %v", store.DayString(day), characterID, err)
+		e.failClose(ctx, job)
 		return
 	}
 
-	prompt, truncated := closePrompt(day, set, msgs, facts)
-	runCtx, _ := json.Marshal(map[string]any{"day": store.DayString(day), "messages": len(msgs), "facts": len(facts), "truncated": truncated})
+	prompt, truncated := closePrompt(characterID, day, set, msgs, facts)
+	runCtx, _ := json.Marshal(map[string]any{"day": store.DayString(day), "character_id": characterID, "messages": len(msgs), "facts": len(facts), "truncated": truncated})
 	runID, err := e.Store.StartRun(ctx, store.Run{Kind: "close", Model: modelID, Context: runCtx, Status: StatusRunning})
 	if err != nil {
-		log.Printf("close %s: starting run: %v", store.DayString(day), err)
-		e.failClose(ctx, day)
+		log.Printf("close %s/%s: starting run: %v", store.DayString(day), characterID, err)
+		e.failClose(ctx, job)
 		return
 	}
 	finish := func(status, errMsg string, usage llm.Usage) {
@@ -165,45 +187,45 @@ func (e *Engine) closeDay(ctx context.Context, day time.Time, set Settings) {
 
 	raw, usage, err := CallStructured(ctx, StructuredSpec{
 		Model: model, ModelID: modelID, Session: "day-close",
-		System: "You extract durable facts about the user from their conversations. You never give advice and never invent anything.",
+		System: "You extract durable facts about the user from one agent's conversations with them. You never give advice and never invent anything.",
 		Prompt: prompt,
 		Schema: `{"facts":[{"op":"ADD|SUPERSEDE|NONE","id":0,"text":"...","category":"preference|person|circumstance|goal|work|health|general","core":false,"source_message_id":0}]}`,
 	})
 	if err != nil {
-		log.Printf("close %s: %v", store.DayString(day), err)
+		log.Printf("close %s/%s: %v", store.DayString(day), characterID, err)
 		finish(StatusError, err.Error(), usage)
-		e.failClose(ctx, day)
+		e.failClose(ctx, job)
 		return
 	}
 
-	ops, rejects := validateCloseDoc(raw, facts, msgs)
+	ops, rejects := validateCloseDoc(raw, characterID, facts, msgs)
 	if len(rejects) > 0 {
 		e.recordRejects(ctx, runID, map[string]any{
-			"day": store.DayString(day), "rejected": rejects, "applied": len(ops),
+			"day": store.DayString(day), "character_id": characterID, "rejected": rejects, "applied": len(ops),
 		})
 	}
-	applied, err := e.Store.ApplyFactOps(ctx, day, ops)
+	applied, err := e.Store.ApplyFactOps(ctx, characterID, day, ops)
 	if err != nil {
-		log.Printf("close %s: applying facts: %v", store.DayString(day), err)
+		log.Printf("close %s/%s: applying facts: %v", store.DayString(day), characterID, err)
 		finish(StatusError, err.Error(), usage)
-		e.failClose(ctx, day)
+		e.failClose(ctx, job)
 		return
 	}
 	// Keep the final trace: how many items were applied and refused.
 	e.recordRejects(ctx, runID, map[string]any{
-		"day": store.DayString(day), "rejected": rejects, "applied": applied,
+		"day": store.DayString(day), "character_id": characterID, "rejected": rejects, "applied": applied,
 	})
 	finish(StatusOK, "", usage)
-	if err := e.Store.FinishCheckin(ctx, day, "close", "sent", nil, &runID); err != nil {
-		log.Printf("close %s: marking sent: %v", store.DayString(day), err)
+	if err := e.Store.FinishCheckin(ctx, day, "close", characterID, "sent", nil, &runID); err != nil {
+		log.Printf("close %s/%s: marking sent: %v", store.DayString(day), characterID, err)
 	}
 }
 
-func (e *Engine) failClose(ctx context.Context, day time.Time) {
-	if attempts, err := e.Store.FailCheckin(context.WithoutCancel(ctx), day, "close"); err != nil {
-		log.Printf("close %s: recording failure: %v", store.DayString(day), err)
+func (e *Engine) failClose(ctx context.Context, job CloseJob) {
+	if attempts, err := e.Store.FailCheckin(context.WithoutCancel(ctx), job.Day, "close", job.CharacterID); err != nil {
+		log.Printf("close %s/%s: recording failure: %v", store.DayString(job.Day), job.CharacterID, err)
 	} else if attempts >= maxAttempts {
-		log.Printf("close %s: giving up after %d attempts", store.DayString(day), attempts)
+		log.Printf("close %s/%s: giving up after %d attempts", store.DayString(job.Day), job.CharacterID, attempts)
 	}
 }
 
@@ -225,10 +247,10 @@ const closeSystemRules = `Rules:
 - text: one short sentence, at most 300 characters.
 - source_message_id: the #id of the message this fact came from, copied from the message lines; omit it if unclear.`
 
-func closePrompt(day time.Time, set Settings, msgs []store.DayMessage, facts []store.Fact) (string, bool) {
+func closePrompt(characterID string, day time.Time, set Settings, msgs []store.DayMessage, facts []store.Fact) (string, bool) {
 	var b strings.Builder
 	truncated := false
-	fmt.Fprintf(&b, "Close the day %s (%s).\n\n", store.DayString(day), day.Format("Monday"))
+	fmt.Fprintf(&b, "Close the day %s (%s) for the agent %q. Everything below is only what this agent was told.\n\n", store.DayString(day), day.Format("Monday"), characterID)
 	if len(facts) > 0 {
 		b.WriteString("Existing active facts:\n")
 		for _, f := range facts {
@@ -257,8 +279,11 @@ func closePrompt(day time.Time, set Settings, msgs []store.DayMessage, facts []s
 	return b.String(), truncated
 }
 
-// validateCloseDoc checks every item; only clean items become store ops.
-func validateCloseDoc(raw json.RawMessage, existing []store.Fact, msgs []store.DayMessage) ([]store.FactOp, []string) {
+// validateCloseDoc checks every item; only clean items become store ops. The
+// facts and messages passed in are already for one character, and the checks
+// here repeat that: a forged cross-owner SUPERSEDE id or source message id is
+// rejected and recorded, never applied.
+func validateCloseDoc(raw json.RawMessage, characterID string, existing []store.Fact, msgs []store.DayMessage) ([]store.FactOp, []string) {
 	var doc struct {
 		Facts []struct {
 			Op              string `json:"op"`
@@ -275,11 +300,16 @@ func validateCloseDoc(raw json.RawMessage, existing []store.Fact, msgs []store.D
 	}
 	validSource := map[int64]bool{}
 	for _, m := range msgs {
-		validSource[m.ID] = true
+		if m.CharacterID == characterID {
+			validSource[m.ID] = true
+		}
 	}
 	byID := map[int64]store.Fact{}
 	byText := map[string]bool{}
 	for _, f := range existing {
+		if f.CharacterID != characterID {
+			continue
+		}
 		byID[f.ID] = f
 		byText[strings.ToLower(strings.TrimSpace(f.Text))] = true
 	}

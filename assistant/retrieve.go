@@ -40,11 +40,11 @@ type Retrieved struct {
 	Text string
 }
 
-// Retrieve searches messages and facts for the user's message. Messages
-// already in the window are excluded, so the model does not see duplicates.
-// With an embedder the search is hybrid; its query embedding has a 1 s budget
-// and falls back to keyword-only on timeout or error.
-func Retrieve(ctx context.Context, s Searcher, query string, loc *time.Location, tz string, exclude []int64, emb llm.Embedder) ([]Retrieved, error) {
+// Retrieve searches one character's own messages and facts for its current
+// message. Messages already in the window are excluded, so the model does not
+// see duplicates. With an embedder the search is hybrid; its query embedding
+// has a 1 s budget and falls back to keyword-only on timeout or error.
+func Retrieve(ctx context.Context, s Searcher, characterID, query string, loc *time.Location, tz string, exclude []int64, emb llm.Embedder) ([]Retrieved, error) {
 	query = strings.TrimSpace(query)
 	if utf8.RuneCountInString(query) < 3 {
 		return nil, nil
@@ -68,7 +68,7 @@ func Retrieve(ctx context.Context, s Searcher, query string, loc *time.Location,
 	var out []Retrieved
 
 	hits, err := s.SearchMessages(ctx, store.MessageQuery{
-		Text: query, TZ: tz, Limit: maxRecallMessages, Exclude: exclude,
+		CharacterID: characterID, Text: query, TZ: tz, Limit: maxRecallMessages, Exclude: exclude,
 		Vector: vec, EmbeddingModel: model,
 	})
 	if err != nil {
@@ -87,7 +87,7 @@ func Retrieve(ctx context.Context, s Searcher, query string, loc *time.Location,
 	}
 
 	facts, err := s.SearchFacts(ctx, store.FactQuery{
-		Text: query, Limit: maxRecallFacts, Vector: vec, EmbeddingModel: model,
+		CharacterID: characterID, Text: query, Limit: maxRecallFacts, Vector: vec, EmbeddingModel: model,
 	})
 	if err != nil {
 		return nil, err

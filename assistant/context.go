@@ -33,10 +33,17 @@ type Character struct {
 	Model    string
 	Persona  string
 	Tools    []string
+	// Context is "memory" (profile.md + the character's own facts and
+	// pre-retrieval) or "none". Every agent has its own memory; none is shared.
+	Context string
 	// Daily marks the assistant: it gets the day's records in context and
 	// lives in one thread per day. Personas never see the user's day.
 	Daily bool
 }
+
+// hasMemory reports whether the character's context setting turns on the memory
+// stack (profile, own facts, own retrieval).
+func (c Character) hasMemory() bool { return c.Context != "none" }
 
 // Context is the prompt for one turn: the system text and the recent history
 // that fits the window. BuildContext is pure so golden tests can pin it.

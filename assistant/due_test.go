@@ -62,7 +62,7 @@ func mustDue(t *testing.T, e *Engine, now time.Time) Plan {
 
 func checkinStatus(t *testing.T, st *store.Store, day time.Time, kind string) string {
 	t.Helper()
-	c, err := st.Checkin(context.Background(), day, kind)
+	c, err := st.Checkin(context.Background(), day, kind, "assistant")
 	if errors.Is(err, store.ErrNotFound) {
 		return "missing"
 	}
@@ -202,7 +202,7 @@ func TestDueFailureRetriesThenGivesUp(t *testing.T) {
 	if res := e.Execute(context.Background(), plan); res.Status != "failed" {
 		t.Fatalf("execute: %+v", res)
 	}
-	c, err := st.Checkin(context.Background(), plan.Day, CheckinMorning)
+	c, err := st.Checkin(context.Background(), plan.Day, CheckinMorning, "assistant")
 	if err != nil || c.Status != "failed" || c.Attempts != 1 {
 		t.Fatalf("after failure: %+v, %v", c, err)
 	}
@@ -339,7 +339,7 @@ func TestDueTriggerMessageIsStoredAndHidden(t *testing.T) {
 	if msgs[1].Role != "assistant" || msgs[1].Content != "Morning!" {
 		t.Fatalf("check-in message: %+v", msgs[1])
 	}
-	c, err := st.Checkin(context.Background(), plan.Day, CheckinMorning)
+	c, err := st.Checkin(context.Background(), plan.Day, CheckinMorning, "assistant")
 	if err != nil || c.MessageID == nil || *c.MessageID != msgs[1].ID || c.RunID == nil {
 		t.Fatalf("checkin row: %+v, %v", c, err)
 	}
@@ -349,7 +349,7 @@ func TestSkipCheckinSkipsAheadOfTime(t *testing.T) {
 	now := local(7, 0)
 	e, st, _ := newTestEngine(t, now)
 	day := LogicalDay(now, testLoc, 4*time.Hour)
-	if err := st.SkipCheckin(context.Background(), day.AddDate(0, 0, 1), CheckinMorning); err != nil {
+	if err := st.SkipCheckin(context.Background(), day.AddDate(0, 0, 1), CheckinMorning, "assistant"); err != nil {
 		t.Fatal(err)
 	}
 

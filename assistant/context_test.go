@@ -216,7 +216,7 @@ func TestLoadRecords(t *testing.T) {
 	// seven-day window are pinned with a fake.
 	day := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
 	f := &fakeRecords{day: day}
-	rec := LoadRecords(context.Background(), f, day, Settings{Loc: mustLoc("Asia/Makassar"), DayStartsAt: 4 * time.Hour})
+	rec := LoadRecords(context.Background(), f, "assistant", day, Settings{Loc: mustLoc("Asia/Makassar"), DayStartsAt: 4 * time.Hour})
 	if !rec.Day.Equal(day) {
 		t.Fatalf("day: %v", rec.Day)
 	}
@@ -297,7 +297,7 @@ func (f *fakeRecords) Projects(_ context.Context) ([]store.Project, error) {
 	return []store.Project{{ID: 1, Name: "work"}}, nil
 }
 
-func (f *fakeRecords) NotedFacts(_ context.Context, _ time.Time, _ int) ([]store.Fact, error) {
+func (f *fakeRecords) NotedFacts(_ context.Context, _ string, _ time.Time, _ int) ([]store.Fact, error) {
 	return []store.Fact{{ID: 9, Text: "mom is visiting", Category: "person", ValidFrom: f.day.AddDate(0, 0, -1)}}, nil
 }
 

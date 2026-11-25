@@ -76,10 +76,10 @@ type Plan struct {
 	Day            time.Time
 	ConversationID string
 	Reminders      []FiredReminder
-	Checkin        string      // morning | evening | ""
-	CheckinRetry   bool        // a pending/failed row is being retried
-	Close          []time.Time // past days whose facts still need extracting
-	Summary        bool        // today's thread outgrew the window
+	Checkin        string     // morning | evening | ""
+	CheckinRetry   bool       // a pending/failed row is being retried
+	Close          []CloseJob // past (day, character) pairs whose facts still need extracting
+	Summary        bool       // today's thread outgrew the window
 }
 
 // CheckinResult is the outcome of Execute.
@@ -183,7 +183,7 @@ func (e *Engine) pickCheckin(ctx context.Context, day, now time.Time, set Settin
 			return "", false, nil
 		}
 		// The morning cannot arrive any more: record that it was skipped.
-		if err := e.Store.SkipCheckin(ctx, day, CheckinMorning); err != nil {
+		if err := e.Store.SkipCheckin(ctx, day, CheckinMorning, e.Char.ID); err != nil {
 			return "", false, err
 		}
 		return CheckinEvening, retry, nil
@@ -199,7 +199,7 @@ func (e *Engine) pickCheckin(ctx context.Context, day, now time.Time, set Settin
 	}
 	if len(planned) > 0 {
 		// They already told us what today is about; don't ask again.
-		return "", false, e.Store.SkipCheckin(ctx, day, CheckinMorning)
+		return "", false, e.Store.SkipCheckin(ctx, day, CheckinMorning, e.Char.ID)
 	}
 
 	ok, retry, err := e.claim(ctx, day, CheckinMorning)
@@ -212,9 +212,9 @@ func (e *Engine) pickCheckin(ctx context.Context, day, now time.Time, set Settin
 // claim decides whether a check-in may run now. A missing row is claimed
 // atomically, so two tabs polling cannot both send it.
 func (e *Engine) claim(ctx context.Context, day time.Time, kind string) (ok, retry bool, err error) {
-	c, err := e.Store.Checkin(ctx, day, kind)
+	c, err := e.Store.Checkin(ctx, day, kind, e.Char.ID)
 	if errors.Is(err, store.ErrNotFound) {
-		claimed, err := e.Store.ClaimCheckin(ctx, day, kind)
+		claimed, err := e.Store.ClaimCheckin(ctx, day, kind, e.Char.ID)
 		return claimed, false, err
 	}
 	if err != nil {
@@ -251,7 +251,7 @@ func (e *Engine) Execute(ctx context.Context, plan Plan) CheckinResult {
 	defer e.release()
 
 	// Another poll may have finished this check-in while this plan waited.
-	if c, err := e.Store.Checkin(ctx, plan.Day, plan.Checkin); err == nil {
+	if c, err := e.Store.Checkin(ctx, plan.Day, plan.Checkin, e.Char.ID); err == nil {
 		if c.Status == "sent" || c.Status == "skipped" {
 			return CheckinResult{}
 		}
@@ -272,7 +272,7 @@ func (e *Engine) Execute(ctx context.Context, plan Plan) CheckinResult {
 	out := CheckinResult{Checkin: kind, Status: "sent", MessageID: res.AssistantMessageID, RunID: res.RunID}
 	if err != nil {
 		out.Status, out.Err = "failed", err
-		if attempts, ferr := e.Store.FailCheckin(context.WithoutCancel(ctx), plan.Day, kind); ferr != nil {
+		if attempts, ferr := e.Store.FailCheckin(context.WithoutCancel(ctx), plan.Day, kind, e.Char.ID); ferr != nil {
 			log.Printf("check-in %s %s: recording failure: %v", store.DayString(plan.Day), kind, ferr)
 		} else if attempts >= maxAttempts {
 			log.Printf("check-in %s %s: giving up after %d attempts: %v", store.DayString(plan.Day), kind, attempts, err)
@@ -287,7 +287,7 @@ func (e *Engine) Execute(ctx context.Context, plan Plan) CheckinResult {
 	if out.RunID != 0 {
 		runID = &out.RunID
 	}
-	if err := e.Store.FinishCheckin(context.WithoutCancel(ctx), plan.Day, kind, "sent", msgID, runID); err != nil {
+	if err := e.Store.FinishCheckin(context.WithoutCancel(ctx), plan.Day, kind, e.Char.ID, "sent", msgID, runID); err != nil {
 		log.Printf("check-in %s %s: marking sent: %v", store.DayString(plan.Day), kind, err)
 	}
 	return out

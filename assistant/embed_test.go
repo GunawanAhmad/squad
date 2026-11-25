@@ -51,7 +51,7 @@ func TestEmbedWorkerOnce(t *testing.T) {
 	if _, err := db.AddMessage(ctx, store.Message{ConversationID: "c", Role: "tool", Content: "a tool result that is definitely long enough"}); err != nil {
 		t.Fatal(err)
 	}
-	fact, err := db.AddFact(ctx, store.Fact{Text: "prefers tea", Category: "preference", ValidFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
+	fact, err := db.AddFact(ctx, store.Fact{CharacterID: "assistant", Text: "prefers tea", Category: "preference", ValidFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
 	if err != nil {
 		t.Fatal(err)
 	}

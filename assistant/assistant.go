@@ -202,16 +202,19 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	day := LogicalDay(now, set.Loc, set.DayStartsAt)
 	var records *Records
 	if rs, ok := r.store.(RecordsStore); ok && req.Character.Daily {
-		loaded := LoadRecords(ctx, rs, day, set)
+		loaded := LoadRecords(ctx, rs, req.Character.ID, day, set)
 		records = &loaded
 	}
+	// Every character retrieves from its own messages and facts; the memory
+	// stack is not tied to the assistant's daily thread any more. Check-ins are
+	// triggered instructions, not the user asking, so they retrieve nothing.
 	var retrieved []Retrieved
-	if searcher, ok := r.store.(Searcher); ok && req.Character.Daily && req.Role != "trigger" {
+	if searcher, ok := r.store.(Searcher); ok && req.Character.hasMemory() && req.Role != "trigger" {
 		tz := set.TZ
 		if tz == "" && set.Loc != nil {
 			tz = set.Loc.String()
 		}
-		hits, err := Retrieve(ctx, searcher, req.Input, set.Loc, tz, cctxIDs(history), r.embedder)
+		hits, err := Retrieve(ctx, searcher, req.Character.ID, req.Input, set.Loc, tz, cctxIDs(history), r.embedder)
 		if err != nil {
 			log.Printf("assistant: pre-retrieval: %v", err)
 		} else {

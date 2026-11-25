@@ -32,12 +32,12 @@ func TestRetrieve(t *testing.T) {
 		t.Fatal(err)
 	}
 	day := localDay(2026, 12, 1)
-	fact, err := db.AddFact(ctx, store.Fact{Text: "deadline stres bikin capek", Category: "circumstance", ValidFrom: day})
+	fact, err := db.AddFact(ctx, store.Fact{CharacterID: "socrates", Text: "deadline stres bikin capek", Category: "circumstance", ValidFrom: day})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	items, err := Retrieve(ctx, db, "deadline stres", testLoc, "Asia/Makassar", nil, nil)
+	items, err := Retrieve(ctx, db, "socrates", "deadline stres", testLoc, "Asia/Makassar", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,12 +50,12 @@ func TestRetrieve(t *testing.T) {
 	if items[1].Kind != "fact" || items[1].ID != fact.ID {
 		t.Fatalf("fact hit: %+v", items[1])
 	}
-	if got, _ := db.GetFact(ctx, fact.ID); got.UseCount != 1 || got.LastUsedAt == nil {
+	if got, _ := db.GetFact(ctx, "socrates", fact.ID); got.UseCount != 1 || got.LastUsedAt == nil {
 		t.Fatalf("fact usage not counted: %+v", got)
 	}
 
 	// A message already in the window is not repeated.
-	items, err = Retrieve(ctx, db, "deadline stres", testLoc, "Asia/Makassar", []int64{old.ID}, nil)
+	items, err = Retrieve(ctx, db, "socrates", "deadline stres", testLoc, "Asia/Makassar", []int64{old.ID}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,10 +64,10 @@ func TestRetrieve(t *testing.T) {
 	}
 
 	// Short queries and misses cost nothing.
-	if items, _ := Retrieve(ctx, db, "a", testLoc, "Asia/Makassar", nil, nil); len(items) != 0 {
+	if items, _ := Retrieve(ctx, db, "socrates", "a", testLoc, "Asia/Makassar", nil, nil); len(items) != 0 {
 		t.Fatalf("short query: %+v", items)
 	}
-	if items, _ := Retrieve(ctx, db, "zeppelin", testLoc, "Asia/Makassar", nil, nil); len(items) != 0 {
+	if items, _ := Retrieve(ctx, db, "socrates", "zeppelin", testLoc, "Asia/Makassar", nil, nil); len(items) != 0 {
 		t.Fatalf("miss: %+v", items)
 	}
 }
@@ -82,34 +82,44 @@ func TestRetrieveSkipsForgotten(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.ForgetMessage(ctx, m.ID); err != nil {
+	if err := db.ForgetMessage(ctx, "assistant", m.ID); err != nil {
 		t.Fatal(err)
 	}
-	if items, _ := Retrieve(ctx, db, "secret deadline", testLoc, "UTC", nil, nil); len(items) != 0 {
+	if items, _ := Retrieve(ctx, db, "assistant", "secret deadline", testLoc, "UTC", nil, nil); len(items) != 0 {
 		t.Fatalf("forgotten message retrieved: %+v", items)
 	}
 }
 
-func TestAssistantTurnRetrievesOldMessages(t *testing.T) {
+func TestTurnRetrievesOnlyItsOwnOldMessages(t *testing.T) {
 	db := storetest.New(t)
 	ctx := context.Background()
-	if _, err := db.CreateConversation(ctx, store.Conversation{ID: "old", CharacterID: "socrates"}); err != nil {
+	// One old message in Ria's own thread and one in the assistant's past day.
+	if _, err := db.CreateConversation(ctx, store.Conversation{ID: "ria-old", CharacterID: "ria"}); err != nil {
 		t.Fatal(err)
 	}
-	old, err := db.AddMessage(ctx, store.Message{ConversationID: "old", Role: "user", Content: "my passport expires in March"})
+	riaMsg, err := db.AddMessage(ctx, store.Message{ConversationID: "ria-old", Role: "user", Content: "my passport expires in March"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pastDay := localDay(2026, 11, 1)
+	if _, err := db.CreateConversation(ctx, store.Conversation{ID: "daily:2026-11-01", CharacterID: "assistant", Day: &pastDay}); err != nil {
+		t.Fatal(err)
+	}
+	assistantMsg, err := db.AddMessage(ctx, store.Message{ConversationID: "daily:2026-11-01", Role: "user", Content: "the car needs a service"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	r, fake := testRunner(db, llmStep("noted"), llmStep("noted"))
-	char := testChar
-	char.ID, char.Daily = "assistant", false
-	if _, err := r.Turn(ctx, TurnRequest{ConversationID: "persona-chat", Character: char, Input: "passport expires"}, nil); err != nil {
+	// Pre-retrieval is part of every character's memory stack now, not only the
+	// assistant's daily turn.
+	persona := testChar
+	if _, err := r.Turn(ctx, TurnRequest{ConversationID: "ria-chat", Character: persona, Input: "passport expires"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	assistantChar := char
-	assistantChar.Daily = true
-	if _, err := r.Turn(ctx, TurnRequest{ConversationID: "daily:2026-12-01", Character: assistantChar, Input: "passport expires"}, nil); err != nil {
+	assistantChar := persona
+	assistantChar.ID, assistantChar.Daily = "assistant", true
+	if _, err := r.Turn(ctx, TurnRequest{ConversationID: "daily:2026-12-01", Character: assistantChar, Input: "car service"}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -117,14 +127,20 @@ func TestAssistantTurnRetrievesOldMessages(t *testing.T) {
 	if len(reqs) != 2 {
 		t.Fatalf("requests: %d", len(reqs))
 	}
-	if strings.Contains(reqs[0].System, "<recall>") {
-		t.Fatalf("persona got pre-retrieval:\n%s", reqs[0].System)
+	if !strings.Contains(reqs[0].System, "<recall>") || !strings.Contains(reqs[0].System, "passport expires in March") {
+		t.Fatalf("ria did not retrieve her own old message:\n%s", reqs[0].System)
 	}
-	if !strings.Contains(reqs[1].System, "<recall>") || !strings.Contains(reqs[1].System, "passport expires in March") {
-		t.Fatalf("assistant did not retrieve the old message:\n%s", reqs[1].System)
+	if strings.Contains(reqs[0].System, "car needs a service") {
+		t.Fatalf("ria saw the assistant's message:\n%s", reqs[0].System)
+	}
+	if !strings.Contains(reqs[1].System, "<recall>") || !strings.Contains(reqs[1].System, "car needs a service") {
+		t.Fatalf("assistant did not retrieve its own old message:\n%s", reqs[1].System)
+	}
+	if strings.Contains(reqs[1].System, "passport expires in March") {
+		t.Fatalf("assistant saw ria's message:\n%s", reqs[1].System)
 	}
 
-	runs, err := db.Runs(ctx, "daily:2026-12-01")
+	runs, err := db.Runs(ctx, "ria-chat")
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("runs: %+v, %v", runs, err)
 	}
@@ -135,14 +151,8 @@ func TestAssistantTurnRetrievesOldMessages(t *testing.T) {
 	if err := json.Unmarshal(runs[0].Context, &trace); err != nil {
 		t.Fatal(err)
 	}
-	found := false
-	for _, id := range trace.RetrievedMessageIDs {
-		if id == old.ID {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("trace ids do not include the old message: %+v", trace)
+	if len(trace.RetrievedMessageIDs) != 1 || trace.RetrievedMessageIDs[0] != riaMsg.ID {
+		t.Fatalf("trace ids: %+v (assistant message %d)", trace.RetrievedMessageIDs, assistantMsg.ID)
 	}
 	if !containsSection(trace.Sections, "recall") {
 		t.Fatalf("trace sections: %v", trace.Sections)
@@ -179,12 +189,12 @@ func TestRetrieveHybrid(t *testing.T) {
 		t.Fatal(err)
 	}
 	emb := fixedEmbedder{model: "fake"}
-	items, err := Retrieve(ctx, db, "burned out", testLoc, "Asia/Makassar", nil, emb)
+	items, err := Retrieve(ctx, db, "assistant", "burned out", testLoc, "Asia/Makassar", nil, emb)
 	if err != nil || len(items) == 0 || !strings.Contains(items[0].Text, "capek") {
 		t.Fatalf("hybrid retrieval: %+v, %v", items, err)
 	}
 	// Without an embedder the same query finds nothing.
-	if items, _ := Retrieve(ctx, db, "burned out", testLoc, "Asia/Makassar", nil, nil); len(items) != 0 {
+	if items, _ := Retrieve(ctx, db, "assistant", "burned out", testLoc, "Asia/Makassar", nil, nil); len(items) != 0 {
 		t.Fatalf("keyword retrieval found something: %+v", items)
 	}
 }

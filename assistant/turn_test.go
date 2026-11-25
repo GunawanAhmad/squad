@@ -430,12 +430,14 @@ func TestOnlyTheAssistantGetsDailyRecords(t *testing.T) {
 	}
 }
 
-// D3: after a web tool ran in a turn, remember/forget are refused for the rest of it.
-func TestTurnRefusesMemoryWritesAfterWebRead(t *testing.T) {
+// D3 applies to personas too: they now have both web tools and their own
+// memory tools, so a web read in a turn locks remember/forget for that turn.
+// recall is a read and stays available.
+func TestPersonaRefusesMemoryWritesAfterWebRead(t *testing.T) {
 	st := newFakeStore()
 	ran := map[string]int{}
 	reg := tools.New()
-	for _, name := range []string{"web_search", "remember", "forget"} {
+	for _, name := range []string{"web_search", "remember", "forget", "recall"} {
 		name := name
 		reg.Add(&tools.Tool{
 			Name: name, Description: name, Parameters: map[string]any{"type": "object"},
@@ -451,6 +453,7 @@ func TestTurnRefusesMemoryWritesAfterWebRead(t *testing.T) {
 		llm.FakeStep{ToolCalls: []llm.ToolCall{
 			{ID: "c", Name: "remember", Arguments: `{}`},
 			{ID: "d", Name: "forget", Arguments: `{}`},
+			{ID: "e", Name: "recall", Arguments: `{}`},
 		}},
 		llm.FakeStep{Text: "done"},
 	)
@@ -461,17 +464,29 @@ func TestTurnRefusesMemoryWritesAfterWebRead(t *testing.T) {
 		Now:      func() time.Time { return testNow },
 		Location: testLoc, Window: 40, MaxSteps: 10,
 	})
+	// A persona, not the daily assistant: no day thread, no day records.
 	char := testChar
-	char.Tools = []string{"web_search", "remember", "forget"}
+	if char.Daily {
+		t.Fatal("test character should be a persona")
+	}
+	char.Context = "memory"
+	char.Tools = []string{"web_search", "remember", "forget", "recall"}
 	emit, _ := collectEvents()
 	if _, err := r.Turn(context.Background(), TurnRequest{ConversationID: "c1", Character: char, Input: "go"}, emit); err != nil {
 		t.Fatal(err)
 	}
-	if ran["remember"] != 1 || ran["forget"] != 0 || ran["web_search"] != 1 {
+	if ran["remember"] != 1 || ran["forget"] != 0 || ran["web_search"] != 1 || ran["recall"] != 1 {
 		t.Fatalf("ran: %v", ran)
 	}
 	calls := st.toolCalls()
-	if len(calls) != 4 || calls[2].Status != "error" || !strings.Contains(calls[2].Result, "refused") || calls[3].Status != "error" {
+	if len(calls) != 5 {
 		t.Fatalf("tool calls: %+v", calls)
+	}
+	if calls[2].Status != "error" || !strings.Contains(calls[2].Result, "refused") ||
+		calls[3].Status != "error" || !strings.Contains(calls[3].Result, "refused") {
+		t.Fatalf("memory writes after a web read were allowed: %+v", calls)
+	}
+	if calls[4].Name != "recall" || calls[4].Status != "ok" {
+		t.Fatalf("recall should still work after a web read: %+v", calls[4])
 	}
 }
