@@ -383,8 +383,13 @@ func (e *Engine) maybeSummarize(ctx context.Context, set Settings) {
 		return
 	}
 	var fresh []store.Message
+	wasForgotten := map[int64]bool{}
 	for _, m := range msgs {
-		if m.ForgottenAt == nil && (m.Role == "user" || m.Role == "assistant") &&
+		if m.ForgottenAt != nil {
+			wasForgotten[m.ID] = true
+			continue
+		}
+		if (m.Role == "user" || m.Role == "assistant") &&
 			(conv.SummaryUpto == nil || m.ID > *conv.SummaryUpto) {
 			fresh = append(fresh, m)
 		}
@@ -459,10 +464,16 @@ func (e *Engine) maybeSummarize(ctx context.Context, set Settings) {
 		return
 	}
 	for _, m := range nowMsgs {
-		if m.ID >= older[0].ID && m.ID <= lastID && m.ForgottenAt != nil {
+		if !wasForgotten[m.ID] && m.ID <= lastID && m.ForgottenAt != nil {
 			_ = e.Store.FinishRun(context.WithoutCancel(ctx), runID, StatusError, "messages forgotten during summary", in, out)
 			return
 		}
+	}
+	// If a forget cleared the summary the prompt was built from, never write a
+	// replacement that still quotes the old text.
+	if latest, err := e.Store.GetConversation(ctx, convID); err != nil || latest.Summary != conv.Summary {
+		_ = e.Store.FinishRun(context.WithoutCancel(ctx), runID, StatusError, "summary changed during the run", in, out)
+		return
 	}
 	if err := e.Store.SetSummary(ctx, convID, summary, lastID); err != nil {
 		_ = e.Store.FinishRun(context.WithoutCancel(ctx), runID, StatusError, err.Error(), in, out)

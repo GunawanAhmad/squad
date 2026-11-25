@@ -188,6 +188,7 @@ func TestSummaryRollsUpOlderMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 	var lastID int64
+	var ids []int64
 	for i := 1; i <= 40; i++ {
 		role := "user"
 		if i%2 == 0 {
@@ -198,6 +199,12 @@ func TestSummaryRollsUpOlderMessages(t *testing.T) {
 			t.Fatal(err)
 		}
 		lastID = m.ID
+		ids = append(ids, m.ID)
+	}
+	// A message forgotten before the run must not make the summary abort
+	// forever; it is already excluded from the prompt by the fresh loop.
+	if err := st.ForgetMessage(ctx, ids[5]); err != nil {
+		t.Fatal(err)
 	}
 
 	if !e.summaryNeeded(ctx, day, e.settings(ctx)) {

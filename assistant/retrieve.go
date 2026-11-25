@@ -94,10 +94,6 @@ func Retrieve(ctx context.Context, s Searcher, query string, loc *time.Location,
 	}
 	var ids []int64
 	for _, f := range facts {
-		// Core facts already sit in <memory>; repeating them wastes the budget.
-		if f.Core {
-			continue
-		}
 		out = append(out, Retrieved{Kind: "fact", ID: f.ID, When: store.DayString(f.ValidFrom), Who: f.Category, Text: clip(f.Text, maxItemRunes)})
 		ids = append(ids, f.ID)
 	}
