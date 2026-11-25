@@ -25,7 +25,7 @@ func TestSkipCheckin(t *testing.T) {
 		t.Fatalf("undo: %+v", res.Undo)
 	}
 	tomorrow := toolsDay().AddDate(0, 0, 1)
-	if c, err := db.Checkin(ctx, tomorrow, "morning"); err != nil || c.Status != "skipped" {
+	if c, err := db.Checkin(ctx, tomorrow, "morning", "assistant"); err != nil || c.Status != "skipped" {
 		t.Fatalf("row: %+v, %v", c, err)
 	}
 
@@ -34,10 +34,10 @@ func TestSkipCheckin(t *testing.T) {
 	if err := db.FinishToolCall(ctx, env.ToolCallID, res.Text, undo, "ok"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tools.ApplyUndo(ctx, db, env.ToolCallID, "", 0); err != nil {
+	if _, err := tools.ApplyUndo(ctx, db, "assistant", env.ToolCallID, "", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Checkin(ctx, tomorrow, "morning"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := db.Checkin(ctx, tomorrow, "morning", "assistant"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("row not removed: %v", err)
 	}
 
@@ -47,7 +47,7 @@ func TestSkipCheckin(t *testing.T) {
 		t.Fatalf("all: %q", all.Text)
 	}
 	for _, kind := range []string{"morning", "evening"} {
-		if c, err := db.Checkin(ctx, toolsDay(), kind); err != nil || c.Status != "skipped" {
+		if c, err := db.Checkin(ctx, toolsDay(), kind, "assistant"); err != nil || c.Status != "skipped" {
 			t.Fatalf("%s: %+v, %v", kind, c, err)
 		}
 	}

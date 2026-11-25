@@ -484,7 +484,7 @@ func encodeUndo(op UndoOp) []byte {
 // target undoes the whole call, which is what the chat's undo tool does.
 // It never silently overwrites: when a record moved on since the write, it
 // refuses with ErrConflict and says what changed.
-func ApplyUndo(ctx context.Context, db *store.Store, toolCallID int64, targetKind string, targetID int64) (string, error) {
+func ApplyUndo(ctx context.Context, db *store.Store, characterID string, toolCallID int64, targetKind string, targetID int64) (string, error) {
 	tc, err := db.GetToolCall(ctx, toolCallID)
 	if err != nil {
 		return "", err
@@ -520,7 +520,7 @@ func ApplyUndo(ctx context.Context, db *store.Store, toolCallID int64, targetKin
 	var summaries []string
 	remaining := append([]UndoOp(nil), ops...)
 	for _, op := range selected {
-		summary, err := applyUndoOp(ctx, db, op)
+		summary, err := applyUndoOp(ctx, db, characterID, op)
 		if err != nil {
 			// Keep the ops that already succeeded out of the stored record so
 			// a retry does not try to apply them a second time and conflict.
@@ -574,7 +574,7 @@ func removeOp(ops []UndoOp, op UndoOp) []UndoOp {
 	return ops
 }
 
-func applyUndoOp(ctx context.Context, db *store.Store, op UndoOp) (string, error) {
+func applyUndoOp(ctx context.Context, db *store.Store, characterID string, op UndoOp) (string, error) {
 	switch op.Op {
 	case "delete_task":
 		t, err := db.GetTask(ctx, op.TaskID)
@@ -647,14 +647,14 @@ func applyUndoOp(ctx context.Context, db *store.Store, op UndoOp) (string, error
 		return fmt.Sprintf("restored reminder #%d %q", prev.ID, prev.Text), nil
 
 	case "forget_fact":
-		f, err := db.GetFact(ctx, op.FactID)
+		f, err := db.GetFact(ctx, characterID, op.FactID)
 		if err != nil {
 			return "", fmt.Errorf("%w: fact #%d is already gone", ErrConflict, op.FactID)
 		}
 		if err := expectFactState(f, op); err != nil {
 			return "", err
 		}
-		if err := db.ForgetFact(ctx, f.ID, time.Now()); err != nil {
+		if err := db.ForgetFact(ctx, characterID, f.ID, time.Now()); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("removed fact #%d %q", f.ID, f.Text), nil
@@ -664,7 +664,10 @@ func applyUndoOp(ctx context.Context, db *store.Store, op UndoOp) (string, error
 		if err := json.Unmarshal(op.PreviousFact, &prev); err != nil {
 			return "", fmt.Errorf("bad fact snapshot: %w", err)
 		}
-		current, err := db.GetFact(ctx, prev.ID)
+		if prev.CharacterID != characterID {
+			return "", fmt.Errorf("%w: fact #%d belongs to another agent", ErrConflict, prev.ID)
+		}
+		current, err := db.GetFact(ctx, characterID, prev.ID)
 		if err != nil {
 			return "", fmt.Errorf("%w: fact #%d is already gone", ErrConflict, prev.ID)
 		}
@@ -681,11 +684,11 @@ func applyUndoOp(ctx context.Context, db *store.Store, op UndoOp) (string, error
 		if err != nil {
 			return "", fmt.Errorf("bad check-in day: %w", err)
 		}
-		c, err := db.Checkin(ctx, day, op.CheckinKind)
+		c, err := db.Checkin(ctx, day, op.CheckinKind, characterID)
 		if err != nil || c.Status != "skipped" {
 			return "", fmt.Errorf("%w: that check-in is not skipped any more", ErrConflict)
 		}
-		if err := db.DeleteCheckin(ctx, day, op.CheckinKind); err != nil {
+		if err := db.DeleteCheckin(ctx, day, op.CheckinKind, characterID); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("re-enabled the %s check-in on %s", op.CheckinKind, op.CheckinDay), nil

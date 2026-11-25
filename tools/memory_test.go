@@ -25,7 +25,7 @@ func TestRememberAndRecall(t *testing.T) {
 	if len(remembered.Undo) != 1 || remembered.Undo[0].Op != "forget_fact" {
 		t.Fatalf("undo: %+v", remembered.Undo)
 	}
-	facts, _ := db.Facts(ctx, store.FactFilter{Status: []string{"active"}})
+	facts, _ := db.Facts(ctx, "assistant", store.FactFilter{Status: []string{"active"}})
 	if len(facts) != 1 || facts[0].SourceMessageID == nil || facts[0].SourceKind != "tool" || !facts[0].Core {
 		t.Fatalf("stored fact: %+v", facts)
 	}
@@ -36,7 +36,7 @@ func TestRememberAndRecall(t *testing.T) {
 		!strings.Contains(got.Text, "prefers short answers") {
 		t.Fatalf("recall: %q", got.Text)
 	}
-	if facts, _ = db.Facts(ctx, store.FactFilter{Status: []string{"active"}}); facts[0].UseCount != 1 {
+	if facts, _ = db.Facts(ctx, "assistant", store.FactFilter{Status: []string{"active"}}); facts[0].UseCount != 1 {
 		t.Fatalf("use_count: %+v", facts[0])
 	}
 
@@ -61,7 +61,7 @@ func TestRememberSupersedes(t *testing.T) {
 	ctx := context.Background()
 
 	old := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
-	bali, err := tools.AddFact(ctx, db, "lives in Bali", "circumstance", true, "user", nil, old, nil)
+	bali, err := tools.AddFact(ctx, db, "assistant", "lives in Bali", "circumstance", true, "user", nil, old, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,11 +69,11 @@ func TestRememberSupersedes(t *testing.T) {
 	if !strings.Contains(res.Text, "superseded #") || len(res.Undo) != 2 {
 		t.Fatalf("supersede: %+v", res)
 	}
-	closed, _ := db.GetFact(ctx, bali.ID)
+	closed, _ := db.GetFact(ctx, "assistant", bali.ID)
 	if closed.Status != "superseded" || closed.ValidTo == nil {
 		t.Fatalf("old fact: %+v", closed)
 	}
-	current, _ := db.Facts(ctx, store.FactFilter{Status: []string{"active"}})
+	current, _ := db.Facts(ctx, "assistant", store.FactFilter{Status: []string{"active"}})
 	if len(current) != 1 || current[0].Text != "lives in Jakarta" {
 		t.Fatalf("active facts: %+v", current)
 	}
@@ -93,14 +93,14 @@ func TestRememberSupersedes(t *testing.T) {
 	if err := db.FinishToolCall(ctx, env.ToolCallID, res.Text, undo, "ok"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tools.ApplyUndo(ctx, db, env.ToolCallID, "", 0); err != nil {
+	if _, err := tools.ApplyUndo(ctx, db, "assistant", env.ToolCallID, "", 0); err != nil {
 		t.Fatal(err)
 	}
-	restored, _ := db.GetFact(ctx, bali.ID)
+	restored, _ := db.GetFact(ctx, "assistant", bali.ID)
 	if restored.Status != "active" || restored.ValidTo != nil || restored.SupersededBy != nil {
 		t.Fatalf("restored fact: %+v", restored)
 	}
-	active, _ := db.Facts(ctx, store.FactFilter{Status: []string{"active"}})
+	active, _ := db.Facts(ctx, "assistant", store.FactFilter{Status: []string{"active"}})
 	if len(active) != 1 || active[0].Text != "lives in Bali" {
 		t.Fatalf("active after undo: %+v", active)
 	}
@@ -112,7 +112,7 @@ func TestForgetNeedsConfirmationAndHidesTheSource(t *testing.T) {
 	ctx := context.Background()
 
 	runTool(t, env, "remember", `{"text":"mom is visiting in January","category":"person"}`)
-	facts, _ := db.Facts(ctx, store.FactFilter{Status: []string{"active"}})
+	facts, _ := db.Facts(ctx, "assistant", store.FactFilter{Status: []string{"active"}})
 	sourceID := *facts[0].SourceMessageID
 
 	// confirm=false only describes what would happen.
@@ -120,7 +120,7 @@ func TestForgetNeedsConfirmationAndHidesTheSource(t *testing.T) {
 	if !strings.Contains(ask.Text, "About to forget") || !strings.Contains(ask.Text, "confirm") {
 		t.Fatalf("confirmation prompt: %q", ask.Text)
 	}
-	if f, _ := db.GetFact(ctx, facts[0].ID); f.Status != "active" {
+	if f, _ := db.GetFact(ctx, "assistant", facts[0].ID); f.Status != "active" {
 		t.Fatal("fact was forgotten before confirmation")
 	}
 
@@ -129,10 +129,10 @@ func TestForgetNeedsConfirmationAndHidesTheSource(t *testing.T) {
 	if !strings.Contains(done.Text, "forgot") || !strings.Contains(done.Text, "hid the message") {
 		t.Fatalf("forget: %q", done.Text)
 	}
-	if f, _ := db.GetFact(ctx, facts[0].ID); f.Status != "forgotten" {
+	if f, _ := db.GetFact(ctx, "assistant", facts[0].ID); f.Status != "forgotten" {
 		t.Fatalf("fact: %+v", f)
 	}
-	if m, _ := db.GetMessage(ctx, sourceID); m.ForgottenAt == nil {
+	if m, _ := db.GetMessage(ctx, "assistant", sourceID); m.ForgottenAt == nil {
 		t.Fatalf("source message not hidden: %+v", m)
 	}
 	// And recall cannot bring it back.

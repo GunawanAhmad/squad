@@ -57,7 +57,7 @@ func overviewTool() *Tool {
 			if err != nil {
 				return Result{}, err
 			}
-			goals, err := env.DB.Facts(ctx, store.FactFilter{
+			goals, err := env.DB.Facts(ctx, env.CharacterID, store.FactFilter{
 				Status: []string{"active"}, Category: "goal", Order: "recent",
 			})
 			if err != nil {

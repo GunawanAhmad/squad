@@ -54,7 +54,7 @@ func TestUndoOneWrite(t *testing.T) {
 		t.Fatalf("tasks: %+v, %v", tasks, err)
 	}
 
-	summary, err := tools.ApplyUndo(ctx, db, planCall, "task", tasks[0].ID)
+	summary, err := tools.ApplyUndo(ctx, db, "assistant", planCall, "task", tasks[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestUndoOneWrite(t *testing.T) {
 	}
 
 	// Undoing the whole call removes the rest and closes the call.
-	summary, err = tools.ApplyUndo(ctx, db, planCall, "", 0)
+	summary, err = tools.ApplyUndo(ctx, db, "assistant", planCall, "", 0)
 	if err != nil || !strings.Contains(summary, `"two"`) {
 		t.Fatalf("whole undo: %q, %v", summary, err)
 	}
@@ -80,7 +80,7 @@ func TestUndoOneWrite(t *testing.T) {
 	if tc, _ := db.GetToolCall(ctx, planCall); tc.Status != "undone" {
 		t.Fatalf("call status: %s", tc.Status)
 	}
-	if _, err := tools.ApplyUndo(ctx, db, planCall, "", 0); !errors.Is(err, tools.ErrConflict) {
+	if _, err := tools.ApplyUndo(ctx, db, "assistant", planCall, "", 0); !errors.Is(err, tools.ErrConflict) {
 		t.Fatalf("second undo: %v", err)
 	}
 
@@ -109,7 +109,7 @@ func TestUndoRefusesWhenTheRecordChanged(t *testing.T) {
 	env = nextCall(t, env)
 	write(t, env, "complete_task", `{"task":"finish the report"}`)
 
-	_, err := tools.ApplyUndo(ctx, db, planCall, "", 0)
+	_, err := tools.ApplyUndo(ctx, db, "assistant", planCall, "", 0)
 	if !errors.Is(err, tools.ErrConflict) || !strings.Contains(err.Error(), "changed since") {
 		t.Fatalf("undo after change: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestUndoRefusesWhenTheRecordChanged(t *testing.T) {
 	if err := db.DeleteActivity(ctx, acts[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tools.ApplyUndo(ctx, db, actCall, "", 0); !errors.Is(err, tools.ErrConflict) {
+	if _, err := tools.ApplyUndo(ctx, db, "assistant", actCall, "", 0); !errors.Is(err, tools.ErrConflict) {
 		t.Fatalf("undo of a deleted row: %v", err)
 	}
 }
@@ -142,7 +142,7 @@ func TestUndoRestoresTaskAndReminder(t *testing.T) {
 	if task.TimesMoved != 1 {
 		t.Fatalf("times moved: %+v", task)
 	}
-	if _, err := tools.ApplyUndo(ctx, db, updateCall, "", 0); err != nil {
+	if _, err := tools.ApplyUndo(ctx, db, "assistant", updateCall, "", 0); err != nil {
 		t.Fatal(err)
 	}
 	back, _ := db.GetTask(ctx, 1)
@@ -157,14 +157,14 @@ func TestUndoRestoresTaskAndReminder(t *testing.T) {
 	if r, _ := db.GetReminder(ctx, 1); r.Status != "cancelled" {
 		t.Fatalf("cancelled: %+v", r)
 	}
-	if _, err := tools.ApplyUndo(ctx, db, cancelCall, "reminder", 1); err != nil {
+	if _, err := tools.ApplyUndo(ctx, db, "assistant", cancelCall, "reminder", 1); err != nil {
 		t.Fatal(err)
 	}
 	if r, _ := db.GetReminder(ctx, 1); r.Status != "pending" {
 		t.Fatalf("restored reminder: %+v", r)
 	}
 	// Undoing the same cancel twice is refused.
-	if _, err := tools.ApplyUndo(ctx, db, cancelCall, "", 0); !errors.Is(err, tools.ErrConflict) {
+	if _, err := tools.ApplyUndo(ctx, db, "assistant", cancelCall, "", 0); !errors.Is(err, tools.ErrConflict) {
 		t.Fatalf("second undo: %v", err)
 	}
 }

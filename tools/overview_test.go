@@ -54,34 +54,34 @@ func TestGetOverview(t *testing.T) {
 	add("too old", 999, -40, &work.ID)
 	add("no project", 15, -1, nil)
 
-	if _, err := db.AddFact(ctx, store.Fact{
+	if _, err := db.AddFact(ctx, store.Fact{CharacterID: env.CharacterID,
 		Text: "prefers tea", Category: "preference", ValidFrom: env.Day.AddDate(0, 0, -10),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 12; i++ {
-		if _, err := db.AddFact(ctx, store.Fact{
+		if _, err := db.AddFact(ctx, store.Fact{CharacterID: env.CharacterID,
 			Text: fmt.Sprintf("goal %02d", i), Category: "goal", ValidFrom: env.Day.AddDate(0, 0, -30),
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	old, err := db.AddFact(ctx, store.Fact{Text: "old goal", Category: "goal", ValidFrom: env.Day.AddDate(0, 0, -40)})
+	old, err := db.AddFact(ctx, store.Fact{CharacterID: env.CharacterID, Text: "old goal", Category: "goal", ValidFrom: env.Day.AddDate(0, 0, -40)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	newer, err := db.AddFact(ctx, store.Fact{Text: "new goal", Category: "goal", ValidFrom: env.Day})
+	newer, err := db.AddFact(ctx, store.Fact{CharacterID: env.CharacterID, Text: "new goal", Category: "goal", ValidFrom: env.Day})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SupersedeOn(ctx, old.ID, newer.ID, env.Day); err != nil {
+	if err := db.SupersedeOn(ctx, env.CharacterID, old.ID, newer.ID, env.Day); err != nil {
 		t.Fatal(err)
 	}
-	gone, err := db.AddFact(ctx, store.Fact{Text: "forgotten goal", Category: "goal", ValidFrom: env.Day})
+	gone, err := db.AddFact(ctx, store.Fact{CharacterID: env.CharacterID, Text: "forgotten goal", Category: "goal", ValidFrom: env.Day})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.ForgetFact(ctx, gone.ID, env.Day); err != nil {
+	if err := db.ForgetFact(ctx, env.CharacterID, gone.ID, env.Day); err != nil {
 		t.Fatal(err)
 	}
 

@@ -59,7 +59,7 @@ func skipCheckinTool() *Tool {
 			var skipped []string
 			var undo []UndoOp
 			for _, kind := range kinds {
-				if err := env.DB.SkipCheckin(ctx, day, kind); err != nil {
+				if err := env.DB.SkipCheckin(ctx, day, kind, env.CharacterID); err != nil {
 					return Result{}, err
 				}
 				skipped = append(skipped, kind)

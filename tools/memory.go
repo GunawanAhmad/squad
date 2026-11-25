@@ -19,9 +19,10 @@ import (
 
 const maxFact = 300
 
-// AddFact validates and inserts one fact. Shared by remember and the Memory
-// screen so both reject the same things.
-func AddFact(ctx context.Context, db *store.Store, text, category string, core bool, sourceKind string, sourceMessageID *int64, from time.Time, toolCallID *int64) (store.Fact, error) {
+// AddFact validates and inserts one fact for one character. Shared by remember
+// and the Memory screen so both reject the same things. There is no unscoped
+// variant: a fact always belongs to exactly one agent.
+func AddFact(ctx context.Context, db *store.Store, characterID, text, category string, core bool, sourceKind string, sourceMessageID *int64, from time.Time, toolCallID *int64) (store.Fact, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return store.Fact{}, fmt.Errorf("%w: text is required", ErrInvalid)
@@ -40,7 +41,7 @@ func AddFact(ctx context.Context, db *store.Store, text, category string, core b
 		sourceKind = "tool"
 	}
 	// Do not store the same active fact twice; say it is already known.
-	existing, err := db.Facts(ctx, store.FactFilter{Status: []string{"active"}})
+	existing, err := db.Facts(ctx, characterID, store.FactFilter{Status: []string{"active"}})
 	if err != nil {
 		return store.Fact{}, err
 	}
@@ -50,20 +51,20 @@ func AddFact(ctx context.Context, db *store.Store, text, category string, core b
 		}
 	}
 	return db.AddFact(ctx, store.Fact{
-		Text: text, Category: category, Core: core, SourceKind: sourceKind,
+		CharacterID: characterID, Text: text, Category: category, Core: core, SourceKind: sourceKind,
 		SourceMessageID: sourceMessageID, ValidFrom: from,
 	})
 }
 
 // ResolveFact finds a fact by "#12", "12" or (part of) its text among
 // non-forgotten facts. Several matches are returned instead of guessed.
-func ResolveFact(ctx context.Context, db *store.Store, ref string) (store.Fact, []store.Fact, error) {
+func ResolveFact(ctx context.Context, db *store.Store, characterID, ref string) (store.Fact, []store.Fact, error) {
 	ref = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ref), "#"))
 	if ref == "" {
 		return store.Fact{}, nil, fmt.Errorf("%w: which fact?", ErrInvalid)
 	}
 	if id, err := strconv.ParseInt(ref, 10, 64); err == nil {
-		f, err := db.GetFact(ctx, id)
+		f, err := db.GetFact(ctx, characterID, id)
 		if err != nil {
 			return store.Fact{}, nil, err
 		}
@@ -72,7 +73,7 @@ func ResolveFact(ctx context.Context, db *store.Store, ref string) (store.Fact, 
 		}
 		return f, nil, nil
 	}
-	all, err := db.Facts(ctx, store.FactFilter{Status: []string{"active", "superseded"}})
+	all, err := db.Facts(ctx, characterID, store.FactFilter{Status: []string{"active", "superseded"}})
 	if err != nil {
 		return store.Fact{}, nil, err
 	}
@@ -144,9 +145,9 @@ func rememberTool() *Tool {
 			var candidates []store.Fact
 			var resolveErr error
 			if strings.TrimSpace(args.Supersedes) != "" {
-				old, candidates, resolveErr = ResolveFact(ctx, env.DB, args.Supersedes)
+				old, candidates, resolveErr = ResolveFact(ctx, env.DB, env.CharacterID, args.Supersedes)
 			}
-			fact, err := AddFact(ctx, env.DB, args.Text, args.Category, args.Core, "tool", env.SourceMessageID, recordToday(env), nil)
+			fact, err := AddFact(ctx, env.DB, env.CharacterID, args.Text, args.Category, args.Core, "tool", env.SourceMessageID, recordToday(env), nil)
 			if err != nil {
 				if errors.Is(err, ErrConflict) {
 					return text(err.Error() + "; no new fact stored"), nil
@@ -171,12 +172,12 @@ func rememberTool() *Tool {
 					summary += fmt.Sprintf(" (fact #%d is already %s)", old.ID, old.Status)
 				default:
 					before := old // active snapshot, restored by undo
-					if err := env.DB.SupersedeOn(ctx, old.ID, fact.ID, recordToday(env)); err != nil {
+					if err := env.DB.SupersedeOn(ctx, env.CharacterID, old.ID, fact.ID, recordToday(env)); err != nil {
 						return Result{}, err
 					}
 					summary += fmt.Sprintf(" (superseded #%d %q, valid until %s)",
 						old.ID, old.Text, store.DayString(recordToday(env).AddDate(0, 0, -1)))
-					if updated, err := env.DB.GetFact(ctx, old.ID); err == nil {
+					if updated, err := env.DB.GetFact(ctx, env.CharacterID, old.ID); err == nil {
 						undo = append(undo, UndoOp{
 							Op: "restore_fact", FactID: old.ID,
 							ExpectUpdated: updated.UpdatedAt.Format(time.RFC3339Nano),
@@ -219,7 +220,7 @@ func forgetTool() *Tool {
 			if err := json.Unmarshal([]byte(raw), &args); err != nil {
 				return Result{}, fmt.Errorf("bad arguments: %w", err)
 			}
-			found, candidates, err := ResolveFact(ctx, env.DB, args.Fact)
+			found, candidates, err := ResolveFact(ctx, env.DB, env.CharacterID, args.Fact)
 			if err != nil {
 				return Result{}, err
 			}
@@ -233,7 +234,7 @@ func forgetTool() *Tool {
 
 			source := ""
 			if found.SourceMessageID != nil {
-				if m, err := env.DB.GetMessage(context.Background(), *found.SourceMessageID); err == nil {
+				if m, err := env.DB.GetMessage(context.Background(), env.CharacterID, *found.SourceMessageID); err == nil {
 					source = fmt.Sprintf(" The message it came from (%s) will also be hidden.",
 						m.CreatedAt.In(env.Loc).Format("2 January 2006"))
 				}
@@ -242,12 +243,12 @@ func forgetTool() *Tool {
 				return text(fmt.Sprintf("About to forget %s.%s Ask the user to confirm; only then call forget again with confirm=true.",
 					FactLine(found), source)), nil
 			}
-			if err := env.DB.ForgetFact(ctx, found.ID, recordToday(env)); err != nil {
+			if err := env.DB.ForgetFact(ctx, env.CharacterID, found.ID, recordToday(env)); err != nil {
 				return Result{}, err
 			}
 			hidden := ""
 			if found.SourceMessageID != nil {
-				if err := env.DB.ForgetMessage(ctx, *found.SourceMessageID); err != nil && !errors.Is(err, store.ErrNotFound) {
+				if err := env.DB.ForgetMessage(ctx, env.CharacterID, *found.SourceMessageID); err != nil && !errors.Is(err, store.ErrNotFound) {
 					return Result{}, err
 				}
 				hidden = " and hid the message it came from"
@@ -317,14 +318,14 @@ func recallTool() *Tool {
 				}
 			}
 			hits, err := env.DB.SearchMessages(ctx, store.MessageQuery{
-				Text: args.Query, From: from, To: to, TZ: tz, Limit: 8,
+				CharacterID: env.CharacterID, Text: args.Query, From: from, To: to, TZ: tz, Limit: 8,
 				Vector: vec, EmbeddingModel: embeddingModel,
 			})
 			if err != nil {
 				return Result{}, err
 			}
 			facts, err := env.DB.SearchFacts(ctx, store.FactQuery{
-				Text: args.Query, From: from, To: to, Limit: 8,
+				CharacterID: env.CharacterID, Text: args.Query, From: from, To: to, Limit: 8,
 				Vector: vec, EmbeddingModel: embeddingModel,
 			})
 			if err != nil {

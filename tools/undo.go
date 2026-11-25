@@ -35,7 +35,7 @@ func undoTool() *Tool {
 			if args.ToolCallID <= 0 {
 				return Result{}, fmt.Errorf("%w: tool_call_id is required", ErrInvalid)
 			}
-			summary, err := ApplyUndo(ctx, env.DB, args.ToolCallID, "", 0)
+			summary, err := ApplyUndo(ctx, env.DB, env.CharacterID, args.ToolCallID, "", 0)
 			if err != nil {
 				return Result{}, err
 			}
