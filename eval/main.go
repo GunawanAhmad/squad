@@ -164,6 +164,14 @@ func main() {
 				printPassResult(model, "cross-language recall", res)
 			}
 		}
+		if contains(cfg.sets, "grounding") {
+			res, err := runGroundingSet(client, reg, specs, persona, model, judge, dsn, cfg.runs, cfg.maxSteps, cfg.limit)
+			if err != nil {
+				fmt.Printf("grounding: %v\n", err)
+			} else {
+				printPassResult(model, "grounding", res)
+			}
+		}
 	}
 }
 
@@ -174,6 +182,7 @@ func printEstimate(cfg config) {
 	adviceJudge := len(adviceCases) * cfg.runs
 	memoryCalls := len(memoryCases) * cfg.runs * 4
 	langCalls := len(crossLanguageCases) * cfg.runs * 4
+	groundingCalls := len(groundingCases) * cfg.runs * 2
 	perModel := 0
 	models := cfg.models
 	if len(models) == 0 {
@@ -194,12 +203,16 @@ func printEstimate(cfg config) {
 	if contains(cfg.sets, "lang") {
 		perModel += langCalls
 	}
+	if contains(cfg.sets, "grounding") {
+		perModel += groundingCalls
+	}
 	fmt.Println("Eval plan (no calls made):")
 	fmt.Printf("  tool calls: %d cases x %d runs = %d calls\n", len(toolCases), cfg.runs, toolCalls)
 	fmt.Printf("  time queries: %d cases x %d runs x ~3 = %d calls\n", len(timeCases), cfg.runs, timeCalls)
 	fmt.Printf("  no-advice: %d cases x %d runs x (generate + judge) = %d calls\n", len(adviceCases), cfg.runs, adviceGen+adviceJudge)
 	fmt.Printf("  memory: %d cases x %d runs x ~4 = %d calls\n", len(memoryCases), cfg.runs, memoryCalls)
 	fmt.Printf("  cross-language: %d cases x %d runs x ~4 = %d calls\n", len(crossLanguageCases), cfg.runs, langCalls)
+	fmt.Printf("  grounding: %d cases x %d runs x ~2 (tool + answer) = %d calls\n", len(groundingCases), cfg.runs, groundingCalls)
 	fmt.Printf("  per model: ~%d calls\n", perModel)
 	fmt.Printf("  models (%d): %s\n", len(models), strings.Join(models, ", "))
 	if cfg.hybrid {
@@ -570,9 +583,35 @@ func defaultSeed() seedData {
 }
 
 func seed(ctx context.Context, db *store.Store, s seedData) error {
+	projectIDs := map[string]int64{}
+	projectID := func(name string) (*int64, error) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil, nil
+		}
+		if id, ok := projectIDs[strings.ToLower(name)]; ok {
+			return &id, nil
+		}
+		p, err := db.EnsureProject(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		projectIDs[strings.ToLower(name)] = p.ID
+		id := p.ID
+		return &id, nil
+	}
+	for _, name := range s.projects {
+		if _, err := projectID(name); err != nil {
+			return err
+		}
+	}
 	for _, t := range s.tasks {
 		planned := t.PlannedOn
-		task := store.Task{Title: t.Title, PlannedOn: &planned, Status: t.Status, TimesMoved: t.TimesMoved}
+		pid, err := projectID(t.Project)
+		if err != nil {
+			return err
+		}
+		task := store.Task{Title: t.Title, ProjectID: pid, PlannedOn: &planned, Status: t.Status, TimesMoved: t.TimesMoved}
 		if t.Status == "done" {
 			done := evalNow
 			task.CompletedAt = &done
@@ -583,7 +622,19 @@ func seed(ctx context.Context, db *store.Store, s seedData) error {
 	}
 	for _, a := range s.activities {
 		day := evalDay.AddDate(0, 0, a.DayOffset)
-		if _, err := db.AddActivity(ctx, store.Activity{Day: day, Description: a.Description, Minutes: a.Minutes}); err != nil {
+		pid, err := projectID(a.Project)
+		if err != nil {
+			return err
+		}
+		if _, err := db.AddActivity(ctx, store.Activity{Day: day, Description: a.Description, Minutes: a.Minutes, ProjectID: pid}); err != nil {
+			return err
+		}
+	}
+	for _, f := range s.facts {
+		from := evalDay.AddDate(0, 0, -f.ValidDaysAgo)
+		if _, err := db.AddFact(ctx, store.Fact{
+			Text: f.Text, Category: f.Category, Core: f.Core, ValidFrom: from,
+		}); err != nil {
 			return err
 		}
 	}
@@ -1017,4 +1068,226 @@ func measureEmbeddings(dsn string, embedder llm.Embedder, n int) {
 			}
 		}
 	}
+}
+
+// ---- grounding ------------------------------------------------------------
+
+func runGroundingSet(client llm.Model, reg *tools.Registry, specs []llm.ToolSpec, persona, model, judgeModel, dsn string, runs, maxSteps, limit int) (passResult, error) {
+	ctx := context.Background()
+	settings := assistant.Settings{
+		TZ: "Asia/Makassar", Loc: evalLoc, DayStartsAt: 4 * time.Hour,
+		MorningAt: 8 * time.Hour, EveningAt: 21 * time.Hour,
+	}
+	out := passResult{perCase: map[string][2]int{}}
+	for ci, c := range groundingCases {
+		if limit > 0 && ci >= limit {
+			break
+		}
+		for i := 0; i < runs; i++ {
+			db, cleanup, err := storetest.NewSchema(ctx, dsn)
+			if err != nil {
+				return out, err
+			}
+			var sd seedData
+			if c.Seed != nil {
+				c.Seed(&sd)
+			}
+			if err := seed(ctx, db, sd); err != nil {
+				db.Close()
+				cleanup()
+				return out, err
+			}
+			rec := assistant.LoadRecords(ctx, db, evalDay, settings)
+			cctx := assistant.BuildContext(assistant.ContextInput{
+				Character: assistant.Character{ID: "assistant", Name: "Assistant", Persona: persona, Tools: assistantTools, Daily: true},
+				Window:    40, Now: evalNow, Settings: settings, Records: &rec,
+			})
+			env := tools.Env{
+				CharacterID: "assistant", Allowed: assistantTools,
+				Now: evalNow, DB: db, Day: evalDay, Loc: evalLoc,
+			}
+			answer, called, toolTexts, err := runTurnTrace(ctx, client, model, cctx.System, specs, reg, env, c.Question, maxSteps)
+			db.Close()
+			cleanup()
+
+			out.total++
+			key := c.Name
+			out.perCase[key] = add2(out.perCase[key], 0, 0)
+			count := out.perCase[key]
+			fail := func(why string) {
+				out.perCase[key] = [2]int{count[0], count[1] + 1}
+				if len(out.firstFailure) < 10 {
+					out.firstFailure = append(out.firstFailure, fmt.Sprintf("%s (%s): %s", key, why, truncate(answer, 200)))
+				}
+			}
+			if err != nil {
+				fail(err.Error())
+				continue
+			}
+			if c.Tool != "" && !contains(called, c.Tool) {
+				fail("did not call " + c.Tool)
+				continue
+			}
+			if why := checkGroundingText(c, answer); why != "" {
+				fail(why)
+				continue
+			}
+			pass, why := judgeGroundingAnswer(c, strings.Join(toolTexts, "\n---\n"), describeSeed(sd), answer)
+			if pass {
+				out.pass++
+				out.perCase[key] = [2]int{count[0] + 1, count[1] + 1}
+			} else {
+				fail(why)
+			}
+		}
+	}
+	return out, nil
+}
+
+// judgeGroundingAnswer checks the two hard requirements without another model
+// call: a focus answer has at most three suggestions, each naming a seeded
+// plan/fact/activity/project, and no number appears outside the tool result and
+// seeded records. Summaries are checked for invented numbers, not suggestions.
+func judgeGroundingAnswer(c groundingCase, toolText, seedText, answer string) (bool, string) {
+	lower := strings.ToLower(answer)
+	if strings.TrimSpace(lower) == "" {
+		return false, "empty answer"
+	}
+	for _, need := range c.WantAll {
+		if !strings.Contains(lower, strings.ToLower(need)) {
+			return false, "missing " + need
+		}
+	}
+	for _, bad := range c.WantNot {
+		if strings.Contains(lower, strings.ToLower(bad)) {
+			return false, "contains " + bad
+		}
+	}
+	if c.Tool == "get_overview" {
+		var suggestions []string
+		for _, line := range strings.Split(answer, "\n") {
+			t := strings.TrimSpace(line)
+			if t == "" {
+				continue
+			}
+			if regexp.MustCompile(`^(\d+[.)]|[-*])\s+`).MatchString(t) {
+				suggestions = append(suggestions, t)
+			}
+		}
+		if len(suggestions) > 3 {
+			return false, "more than 3 suggestions"
+		}
+		for _, s := range suggestions {
+			if !citesAllowed(s, c.Allowed) {
+				return false, "uncited suggestion: " + truncate(s, 80)
+			}
+		}
+	}
+	// Every number must exist in the tool result or the seeded records (dates,
+	// ages, ids and per-entry minutes included). Numbers 1..3 are skipped:
+	// they are suggestion numbering and "three things" counts, not totals.
+	for _, n := range regexp.MustCompile(`\d+`).FindAllString(answer, -1) {
+		if len(n) == 1 && n[0] >= '1' && n[0] <= '3' {
+			continue
+		}
+		if !strings.Contains(toolText, n) && !strings.Contains(seedText, n) {
+			return false, "number not in records: " + n
+		}
+	}
+	return true, ""
+}
+
+func citesAllowed(s string, allowed []string) bool {
+	lower := strings.ToLower(s)
+	for _, a := range allowed {
+		if a != "" && strings.Contains(lower, strings.ToLower(a)) {
+			return true
+		}
+	}
+	return false
+}
+
+// describeSeed gives the judge the same seeded records the model can see in
+// its context, so a real activity name/date is not mistaken for invention.
+func describeSeed(sd seedData) string {
+	var b strings.Builder
+	for _, p := range sd.projects {
+		fmt.Fprintf(&b, "project: %s\n", p)
+	}
+	for _, t := range sd.tasks {
+		planned := "no date"
+		if !t.PlannedOn.IsZero() {
+			planned = store.DayString(t.PlannedOn)
+		}
+		fmt.Fprintf(&b, "plan: %s (status %s, planned %s, moved %dx)\n", t.Title, t.Status, planned, t.TimesMoved)
+	}
+	for _, a := range sd.activities {
+		day := store.DayString(evalDay.AddDate(0, 0, a.DayOffset))
+		minutes := 0
+		if a.Minutes != nil {
+			minutes = *a.Minutes
+		}
+		fmt.Fprintf(&b, "activity: %s on %s, %d min", a.Description, day, minutes)
+		if a.Project != "" {
+			fmt.Fprintf(&b, ", project %s", a.Project)
+		}
+		b.WriteString("\n")
+	}
+	for _, f := range sd.facts {
+		fmt.Fprintf(&b, "fact: [%s] %s\n", f.Category, f.Text)
+	}
+	if b.Len() == 0 {
+		return "(none)"
+	}
+	return b.String()
+}
+
+func checkGroundingText(c groundingCase, answer string) string {
+	lower := strings.ToLower(answer)
+	if strings.TrimSpace(lower) == "" {
+		return "empty answer"
+	}
+	for _, need := range c.WantAll {
+		if !strings.Contains(lower, strings.ToLower(need)) {
+			return "missing " + need
+		}
+	}
+	for _, bad := range c.WantNot {
+		if strings.Contains(lower, strings.ToLower(bad)) {
+			return "contains " + bad
+		}
+	}
+	return ""
+}
+
+// runTurnTrace is runTurn plus the names and outputs of every tool call, for
+// judges that need to compare the answer with the tool result.
+func runTurnTrace(ctx context.Context, client llm.Model, model, system string, specs []llm.ToolSpec, reg *tools.Registry, env tools.Env, question string, maxSteps int) (string, []string, []string, error) {
+	msgs := []llm.Message{{Role: "user", Content: question}}
+	var called, outputs []string
+	for step := 0; step < maxSteps; step++ {
+		resp, err := streamCall(ctx, client, llm.Request{
+			Model: model, System: system, Messages: msgs, Tools: specs, Session: "eval-grounding",
+		}, func(string) {})
+		if err != nil {
+			return "", called, outputs, err
+		}
+		msgs = append(msgs, llm.Message{Role: "assistant", Content: resp.Text, ToolCalls: resp.ToolCalls, Reasoning: resp.Reasoning})
+		if len(resp.ToolCalls) == 0 {
+			return resp.Text, called, outputs, nil
+		}
+		for _, tc := range resp.ToolCalls {
+			called = append(called, tc.Name)
+			out := "error: no result"
+			res, err := reg.Run(ctx, env, tc.Name, tc.Arguments)
+			if err != nil {
+				out = "error: " + err.Error()
+			} else {
+				out = res.Text
+			}
+			outputs = append(outputs, tc.Name+":\n"+out)
+			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: out})
+		}
+	}
+	return "", called, outputs, fmt.Errorf("step limit")
 }

@@ -112,3 +112,30 @@ func TestGetOverview(t *testing.T) {
 		t.Fatalf("expected 15 plans and 10 goals, got %d bullet lines:\n%s", n, res.Text)
 	}
 }
+
+func TestOverviewProjectCap(t *testing.T) {
+	db := storetest.New(t)
+	env, _ := envFor(t, db, "get_overview")
+	ctx := context.Background()
+	for i := 1; i <= 12; i++ {
+		name := fmt.Sprintf("project %02d", i)
+		p, err := db.EnsureProject(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := 1
+		if _, err := db.AddActivity(ctx, store.Activity{
+			Description: "work", Minutes: &m, Day: env.Day, ProjectID: &p.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := runTool(t, env, "get_overview", `{}`)
+	if !strings.Contains(res.Text, "+2 more projects") {
+		t.Fatalf("project cap missing:\n%s", res.Text)
+	}
+	if n := strings.Count(res.Text, ": 1 min\n"); n != 20 {
+		// 10 projects in each of the 7-day and 30-day blocks.
+		t.Fatalf("expected 10 projects per period, got %d:\n%s", n, res.Text)
+	}
+}

@@ -16,7 +16,7 @@ const DefaultWindow = 40
 // net, not the normal case; every cut is recorded and logged.
 const (
 	MaxSystemChars  = 16000
-	budgetPersona   = 3000
+	budgetPersona   = 4000
 	budgetMemory    = 3000
 	budgetToday     = 3000
 	budgetDigest    = 2000

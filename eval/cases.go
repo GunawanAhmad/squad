@@ -155,13 +155,16 @@ var adviceCases = []adviceCase{
 }
 
 type seedData struct {
+	projects     []string
 	tasks        []seedTask
 	activities   []seedActivity
+	facts        []seedFact
 	reminderText string
 }
 
 type seedTask struct {
 	Title      string
+	Project    string
 	PlannedOn  time.Time
 	Status     string
 	TimesMoved int
@@ -169,6 +172,7 @@ type seedTask struct {
 
 type seedActivity struct {
 	Description string
+	Project     string
 	Minutes     *int
 	DayOffset   int
 }

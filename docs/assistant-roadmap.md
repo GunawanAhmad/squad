@@ -539,3 +539,21 @@ Caveats recorded with the numbers:
 - The judge uses substring matching; an answer that echoes the question's key phrase can pass without having retrieved the message. The cross-language number is therefore an upper bound on true recall.
 - The "forget stays forgotten" case failed all three runs for both models: the database state was correct (fact forgotten, source hidden), but the reply repeated the forgotten content ("mom visiting"). The current thread still contains the user's forget request; the persona needs a rule not to restate forgotten content.
 - No M-10 measurement was taken yet: the Ollama CPU container is configured but not running (target is the VPS). M-10 was merged into `main` on request before the comparison, but it is disabled unless `EMBEDDINGS_URL` is set. The keyword-vs-hybrid comparison is still required to decide whether to keep it enabled. If hybrid loses, leave it unset (keyword-only) or revert the commit.
+
+## Verified during Phase 3 (2026-11-25)
+
+Run on `claude-haiku-5-5`, 3 runs per case, fixed clock Tuesday 1 December 2026.
+
+| Set | Result |
+|---|---|
+| Grounding (10 cases) | **30/30 (100%)** |
+| No unsolicited advice (10 cases) | 30/30 (100%) |
+| Tool calls (39 cases) | 107/117 (91.5%); fields 141/153 (92.2%) |
+
+The grounding check is deterministic: the model must call `get_overview` or `get_summary`; a focus answer has at most three suggestions; each suggestion names a seeded plan, goal fact, activity or project; and every number must appear in the tool result or the seeded records. Summaries are checked for the seeded totals and invented records. An LLM judge was tried first and rejected valid seeded details (activity names/dates visible in context but not in the tool text), so it was replaced; no judge call is spent on grounding now.
+
+The tool failures include two runs of "I dropped the newsletter idea" with no tool call, and three Indonesian "laporan" references. The tool cases seed English task titles, so no task named "laporan" exists; the model resolved to "finish the report" (`#2`), which the matcher does not accept. That is an eval-seed artifact, not a tool bug; the measured 91.5% still clears the 90% gate.
+
+The assistant persona is now 3,675 characters. Its section budget was raised from 3,000 to 4,000 during this phase: the old cap silently truncated the D3 web rules, which the Phase 3 additions pushed past the limit.
+
+Phase 2 open items are unchanged: hybrid search is off unless `EMBEDDINGS_URL` is set, the keyword/hybrid comparison is still pending, and cross-language recall remains below its bar.
