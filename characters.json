@@ -128,9 +128,9 @@
         "blipFrequency": 420
       },
       "portrait": {
-        "idle": "/characters/assistant/portrait.png",
-        "thinking": "/characters/assistant/portrait.png",
-        "talking": "/characters/assistant/portrait.png"
+        "idle": "/characters/general/portrait.png",
+        "thinking": "/characters/general/portrait.png",
+        "talking": "/characters/general/portrait.png"
       }
     },
     "model": "claude-haiku-5-5",
