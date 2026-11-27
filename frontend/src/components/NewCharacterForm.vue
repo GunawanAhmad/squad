@@ -85,29 +85,32 @@ const save = () => run(async () => {
         aria-label="Character description"
         placeholder="A retired sea captain who explains economics through storms and cargo"
       />
-      <div
-        class="member-chips"
-        role="group"
-        aria-label="Tools"
-      >
-        <button
-          v-for="t in TOOLS"
-          :key="t.id"
-          type="button"
-          class="member-chip"
-          :aria-pressed="tools.includes(t.id)"
-          @click="tools = toggleTool(tools, t.id)"
+      <div class="room-form-row form-foot">
+        <div
+          class="member-chips"
+          role="group"
+          aria-label="Tools"
         >
-          {{ t.label }}
+          <span class="chips-label">Tools</span>
+          <button
+            v-for="t in TOOLS"
+            :key="t.id"
+            type="button"
+            class="member-chip"
+            :aria-pressed="tools.includes(t.id)"
+            @click="tools = toggleTool(tools, t.id)"
+          >
+            {{ t.label }}
+          </button>
+        </div>
+        <button
+          class="room-create"
+          type="submit"
+          :disabled="busy || !description.trim()"
+        >
+          {{ busy ? 'Drafting…' : 'Generate' }}
         </button>
       </div>
-      <button
-        class="room-create"
-        type="submit"
-        :disabled="busy || !description.trim()"
-      >
-        {{ busy ? 'Drafting…' : 'Generate' }}
-      </button>
     </template>
 
     <template v-else>

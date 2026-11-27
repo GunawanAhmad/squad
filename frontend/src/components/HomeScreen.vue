@@ -11,12 +11,19 @@ const emit = defineEmits<{ pick: [Character]; openRoom: [Room]; created: [Charac
 const name = ref('');
 const selected = ref<string[]>([]);
 const creating = ref(false);
+const roomDialog = ref<HTMLDialogElement>();
+const charDialog = ref<HTMLDialogElement>();
 const error = ref('');
 
 function toggle(id: string) {
   selected.value = selected.value.includes(id)
     ? selected.value.filter((x) => x !== id)
     : [...selected.value, id];
+}
+
+// Clicks on the dialog itself (not its form) land on the backdrop.
+function closeOnBackdrop(e: MouseEvent) {
+  if (e.target === e.currentTarget) (e.currentTarget as HTMLDialogElement).close();
 }
 
 // Used when the name is left blank: "Ria, Bob, Claude".
@@ -39,6 +46,7 @@ async function createRoom() {
     });
     name.value = '';
     selected.value = [];
+    roomDialog.value?.close();
     emit('openRoom', room);
   } catch (err) {
     error.value = (err as Error).message;
@@ -47,10 +55,11 @@ async function createRoom() {
   }
 }
 
-function memberNames(room: Room) {
-  return room.members
-    .map((id) => props.chars.find((c) => c.id === id)?.name ?? id)
-    .join(' · ');
+function members(room: Room) {
+  return room.members.map((id) => {
+    const c = props.chars.find((x) => x.id === id);
+    return { id, name: c?.name ?? id, color: c?.ui.accentColor };
+  });
 }
 </script>
 
@@ -80,6 +89,13 @@ function memberNames(room: Room) {
           <span class="home-desc">{{ c.ui.description }}</span>
         </span>
       </button>
+      <button
+        class="home-card home-new"
+        @click="charDialog?.showModal()"
+      >
+        <span class="home-new-plus">+</span>
+        New character
+      </button>
     </div>
 
     <div class="rooms">
@@ -87,10 +103,7 @@ function memberNames(room: Room) {
       <p class="muted rooms-hint">
         Everyone in a room hears everything said there. You are always in it.
       </p>
-      <ul
-        v-if="rooms.length"
-        class="room-list"
-      >
+      <ul class="room-list">
         <li
           v-for="r in rooms"
           :key="r.id"
@@ -100,11 +113,32 @@ function memberNames(room: Room) {
             @click="emit('openRoom', r)"
           >
             <span class="room-name">{{ r.name }}</span>
-            <span class="muted">{{ memberNames(r) }}</span>
+            <span class="room-members">
+              <span
+                v-for="m in members(r)"
+                :key="m.id"
+                class="room-member"
+                :style="{ '--accent': m.color }"
+              >{{ m.name }}</span>
+            </span>
+          </button>
+        </li>
+        <li>
+          <button
+            class="room-card room-new"
+            @click="roomDialog?.showModal()"
+          >
+            + New room
           </button>
         </li>
       </ul>
+    </div>
 
+    <dialog
+      ref="roomDialog"
+      class="form-dialog"
+      @click="closeOnBackdrop"
+    >
       <form
         class="room-form"
         @submit.prevent="createRoom"
@@ -150,14 +184,33 @@ function memberNames(room: Room) {
           {{ error }}
         </p>
       </form>
-    </div>
+      <button
+        type="button"
+        class="dialog-close"
+        aria-label="Close"
+        @click="roomDialog?.close()"
+      >
+        ×
+      </button>
+    </dialog>
 
-    <div class="rooms">
-      <h2>Characters</h2>
+    <dialog
+      ref="charDialog"
+      class="form-dialog"
+      @click="closeOnBackdrop"
+    >
       <NewCharacterForm
         :chars="chars"
-        @created="emit('created', $event)"
+        @created="charDialog?.close(); emit('created', $event)"
       />
-    </div>
+      <button
+        type="button"
+        class="dialog-close"
+        aria-label="Close"
+        @click="charDialog?.close()"
+      >
+        ×
+      </button>
+    </dialog>
   </section>
 </template>
