@@ -10,7 +10,9 @@ database that keeps every conversation.
 
 ## The squad
 
-Characters are defined in `characters.json`. Three ship today:
+Characters are defined in `characters.json`, and you can make more from the
+home screen: describe one, pick its tools (web and its own memory only), review
+the draft, and save it to the `characters` table. Three ship today:
 
 | Character | What it does | Default model |
 |---|---|---|

@@ -91,10 +91,6 @@ func main() {
 	if err := json.Unmarshal(raw, &list); err != nil {
 		log.Fatal("characters.json: ", err)
 	}
-	chars := map[string]Character{}
-	for _, c := range list {
-		chars[c.ID] = c
-	}
 	if err := validateCharacters(list, toolRegistry); err != nil {
 		log.Fatal(err)
 	}
@@ -104,6 +100,11 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+
+	chars, err := loadRoster(context.Background(), list, db)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Phase 2: the old memory/<char>.json notes become facts once. The profile
 	// stays a file. Nothing from memory/ is ever printed.
@@ -142,7 +143,7 @@ func main() {
 	})
 
 	var engine *assistant.Engine
-	if c, ok := chars[assistantCharacterID]; ok {
+	if c, ok := chars.get(assistantCharacterID); ok {
 		provider, model, err := resolveModel(c, "")
 		if err != nil {
 			log.Fatal(err)
@@ -155,7 +156,7 @@ func main() {
 		}
 	}
 
-	s := &server{chars: chars, list: list, db: db, records: db, runner: runner, engine: engine}
+	s := &server{roster: chars, db: db, records: db, runner: runner, engine: engine}
 	mux := http.NewServeMux()
 	s.routes(mux)
 
@@ -200,10 +201,39 @@ func toAssistantCharacter(c Character, provider, model string) assistant.Charact
 	}
 }
 
+// loadRoster merges the characters made in the app into the ones from
+// characters.json. A stored character that no longer validates (say, its id
+// is now taken in characters.json) is skipped with a log, not fatal.
+func loadRoster(ctx context.Context, list []Character, db *store.Store) (*roster, error) {
+	r := newRoster(list)
+	specs, err := db.Characters(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("characters table: %w", err)
+	}
+	for _, spec := range specs {
+		var c Character
+		if err := json.Unmarshal(spec, &c); err != nil {
+			log.Printf("characters: skipping a stored character: %v", err)
+			continue
+		}
+		if err := r.add(ctx, c); err != nil {
+			log.Printf("characters: skipping stored %q: %v", c.ID, err)
+		}
+	}
+	r.save = func(ctx context.Context, c Character) error {
+		spec, err := json.Marshal(c)
+		if err != nil {
+			return err
+		}
+		return db.AddCharacter(ctx, c.ID, spec)
+	}
+	return r, nil
+}
+
 // gateModel is the model id the room share gate runs with: the assistant's
 // model from characters.json, unless settings.jobs_model overrides it.
-func gateModel(chars map[string]Character) string {
-	if c, ok := chars[assistantCharacterID]; ok {
+func gateModel(chars *roster) string {
+	if c, ok := chars.get(assistantCharacterID); ok {
 		return c.Model
 	}
 	return ""
@@ -212,9 +242,9 @@ func gateModel(chars map[string]Character) string {
 // memoryEnabled reports which characters have their memory stack on. A
 // character set to context "none" is skipped by the day-close job too; an
 // unknown id (removed from characters.json) is not given new facts.
-func memoryEnabled(chars map[string]Character) func(string) bool {
+func memoryEnabled(chars *roster) func(string) bool {
 	return func(charID string) bool {
-		c, ok := chars[charID]
+		c, ok := chars.get(charID)
 		return ok && c.Context != "none"
 	}
 }
@@ -222,9 +252,9 @@ func memoryEnabled(chars map[string]Character) func(string) bool {
 // characterMemory is the always-in-prompt block for one agent: the shared
 // profile.md the user writes, plus that agent's own core facts. Context "none"
 // turns it off; another agent's facts are never part of it.
-func characterMemory(chars map[string]Character, db *store.Store) func(string) string {
+func characterMemory(chars *roster, db *store.Store) func(string) string {
 	return func(charID string) string {
-		c, ok := chars[charID]
+		c, ok := chars.get(charID)
 		if !ok || c.Context == "none" {
 			return ""
 		}

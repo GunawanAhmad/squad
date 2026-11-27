@@ -43,6 +43,11 @@ function pick(c: Character) {
   screen.value = 'chat';
 }
 
+function created(c: Character) {
+  chars.value.push(c);
+  pick(c);
+}
+
 function home() {
   play('back');
   screen.value = 'home';
@@ -148,6 +153,7 @@ function toggleMemory() {
         :rooms="rooms"
         @pick="pick"
         @open-room="openRoom"
+        @created="created"
       />
       <ChatScreen
         v-else-if="screen === 'chat' && current"

@@ -42,7 +42,7 @@ func (s *server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "me cannot be a member", http.StatusBadRequest)
 			return
 		}
-		if _, ok := s.chars[id]; !ok {
+		if _, ok := s.roster.get(id); !ok {
 			http.Error(w, "unknown character", http.StatusBadRequest)
 			return
 		}
@@ -133,7 +133,7 @@ func (s *server) handlePostRoomMessage(w http.ResponseWriter, r *http.Request) {
 
 	members := make([]assistant.Member, 0, len(room.Members))
 	for _, id := range room.Members {
-		c, ok := s.chars[id]
+		c, ok := s.roster.get(id)
 		if !ok {
 			http.Error(w, "unknown character", http.StatusBadRequest)
 			return

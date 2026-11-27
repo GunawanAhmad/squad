@@ -265,18 +265,16 @@ func testServer(steps ...llm.FakeStep) (*server, *memStore, *llm.Fake) {
 		Now:      func() time.Time { return time.Date(2026, 12, 1, 9, 0, 0, 0, time.UTC) },
 		Location: time.UTC,
 	})
-	chars := map[string]Character{
-		"ria": {
+	chars := newRoster([]Character{
+		{
 			ID: "ria", Name: "Ria", Persona: "You are Ria.", Model: "fake-model",
 			Models: []string{"fake-model", "claude/opus"}, Tools: []string{"echo"},
 		},
-		"claude-char": {
+		{
 			ID: "claude-char", Name: "Claude", Provider: "claude", Model: "opus", Persona: "You are Claude.",
 		},
-	}
-	return &server{
-		chars: chars, list: []Character{chars["ria"], chars["claude-char"]}, db: st, runner: runner,
-	}, st, fake
+	})
+	return &server{roster: chars, db: st, runner: runner}, st, fake
 }
 
 func (s *server) handler() http.Handler {

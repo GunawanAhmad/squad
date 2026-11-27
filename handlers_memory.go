@@ -32,7 +32,7 @@ func (s *server) memoryCharacter(w http.ResponseWriter, r *http.Request) (string
 		http.Error(w, "character is required", http.StatusBadRequest)
 		return "", false
 	}
-	if _, ok := s.chars[id]; !ok {
+	if _, ok := s.roster.get(id); !ok {
 		http.Error(w, "unknown character", http.StatusBadRequest)
 		return "", false
 	}

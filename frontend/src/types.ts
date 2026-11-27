@@ -7,10 +7,17 @@ export interface Character {
   discretion: number; // 0-10, how much the character shares about you in a room
   ui: {
     tagline: string; description: string; accentColor: string; selectLine: string;
-    portrait: Record<PortraitState, string>;
+    portrait?: Record<PortraitState, string>; // characters made in the app have none yet
     stats: { label: string; value: number }[]; // value out of 10
     voice: { pitch: number; rate: number; blipFrequency: number };
   };
+}
+// The editable part of a new character (handlers_characters.go charDraft).
+export interface CharacterDraft {
+  name: string; tagline: string; description: string; selectLine: string; accentColor: string;
+  persona: string; discretion: number; tools: string[]; model: string;
+  stats: { label: string; value: number }[];
+  voice: { pitch: number; rate: number; blipFrequency: number };
 }
 export interface ToolCall { name: string; args: string; id?: number }
 export interface Message { role: 'user' | 'assistant'; content: string; tools?: ToolCall[] }

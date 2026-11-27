@@ -2,10 +2,11 @@
 import { computed, ref } from 'vue';
 import { api } from '../api';
 import CharacterPortrait from './CharacterPortrait.vue';
+import NewCharacterForm from './NewCharacterForm.vue';
 import type { Character, Room } from '../types';
 
 const props = defineProps<{ chars: Character[]; rooms: Room[] }>();
-const emit = defineEmits<{ pick: [Character]; openRoom: [Room] }>();
+const emit = defineEmits<{ pick: [Character]; openRoom: [Room]; created: [Character] }>();
 
 const name = ref('');
 const selected = ref<string[]>([]);
@@ -149,6 +150,14 @@ function memberNames(room: Room) {
           {{ error }}
         </p>
       </form>
+    </div>
+
+    <div class="rooms">
+      <h2>Characters</h2>
+      <NewCharacterForm
+        :chars="chars"
+        @created="emit('created', $event)"
+      />
     </div>
   </section>
 </template>

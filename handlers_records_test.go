@@ -26,8 +26,8 @@ func newRecordServer(t *testing.T) (*server, *store.Store, *http.ServeMux) {
 	t.Helper()
 	db := storetest.New(t)
 	s := &server{
-		chars: map[string]Character{"assistant": {ID: "assistant", Name: "Assistant"}},
-		db:    db, records: db, now: func() time.Time { return testNow },
+		roster: newRoster([]Character{{ID: "assistant", Name: "Assistant"}}),
+		db:     db, records: db, now: func() time.Time { return testNow },
 		memoryDir: t.TempDir(),
 	}
 	mux := http.NewServeMux()
@@ -288,8 +288,8 @@ func TestDueEndpoint(t *testing.T) {
 		Char: assistant.Character{ID: "assistant", Provider: "opencode", Model: "fake", Daily: true},
 	}
 	s := &server{
-		chars: map[string]Character{"assistant": {ID: "assistant"}},
-		db:    db, records: db, engine: engine, now: func() time.Time { return testNow },
+		roster: newRoster([]Character{{ID: "assistant"}}),
+		db:     db, records: db, engine: engine, now: func() time.Time { return testNow },
 	}
 	mux := http.NewServeMux()
 	s.routes(mux)

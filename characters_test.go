@@ -108,11 +108,11 @@ func TestAssistantPersonaFitsBudget(t *testing.T) {
 }
 
 func TestMemoryEnabledFollowsContext(t *testing.T) {
-	enabled := memoryEnabled(map[string]Character{
-		"assistant": {ID: "assistant", Context: "memory"},
-		"ria":       {ID: "ria"}, // empty means the default, memory
-		"mute":      {ID: "mute", Context: "none"},
-	})
+	enabled := memoryEnabled(newRoster([]Character{
+		{ID: "assistant", Context: "memory"},
+		{ID: "ria"}, // empty means the default, memory
+		{ID: "mute", Context: "none"},
+	}))
 	for id, want := range map[string]bool{"assistant": true, "ria": true, "mute": false, "removed": false} {
 		if got := enabled(id); got != want {
 			t.Fatalf("memoryEnabled(%q) = %v, want %v", id, got, want)

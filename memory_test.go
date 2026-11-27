@@ -130,11 +130,11 @@ func TestCharacterMemoryIsPerAgent(t *testing.T) {
 	if _, err := db.AddFact(ctx, store.Fact{CharacterID: "ria", Text: "is moving to Jakarta", Category: "circumstance", Core: true}); err != nil {
 		t.Fatal(err)
 	}
-	chars := map[string]Character{
-		"assistant": {ID: "assistant", Context: "memory"},
-		"ria":       {ID: "ria", Context: "memory"},
-		"mute":      {ID: "mute", Context: "none"},
-	}
+	chars := newRoster([]Character{
+		{ID: "assistant", Context: "memory"},
+		{ID: "ria", Context: "memory"},
+		{ID: "mute", Context: "none"},
+	})
 	memoryFor := characterMemory(chars, db)
 
 	assistantBlock := memoryFor("assistant")

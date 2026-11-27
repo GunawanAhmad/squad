@@ -38,8 +38,7 @@ var conversationIDRe = regexp.MustCompile(`^[A-Za-z0-9:_-]{1,80}$`)
 const maxMessageChars = 50_000
 
 type server struct {
-	chars     map[string]Character
-	list      []Character
+	roster    *roster
 	db        apiStore
 	records   *store.Store // nullable in conversation-only tests
 	memoryDir string       // memory/ (tests use a temp dir)
@@ -75,6 +74,8 @@ func (s *server) clock() time.Time {
 
 func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/characters", s.handleCharacters)
+	mux.HandleFunc("POST /api/characters", s.handleCreateCharacter)
+	mux.HandleFunc("POST /api/characters/draft", s.handleDraftCharacter)
 	mux.HandleFunc("POST /api/conversations", s.handleCreateConversation)
 	mux.HandleFunc("GET /api/conversations", s.handleListConversations)
 	mux.HandleFunc("POST /api/conversations/import", s.handleImportConversation)
@@ -113,11 +114,17 @@ func (s *server) routes(mux *http.ServeMux) {
 }
 
 func (s *server) handleCharacters(w http.ResponseWriter, _ *http.Request) {
-	public := make([]map[string]any, 0, len(s.list))
-	for _, c := range s.list {
-		public = append(public, map[string]any{"id": c.ID, "name": c.Name, "ui": c.UI, "model": choice(c.Provider, c.Model), "models": c.Models, "discretion": discretionOf(c)})
+	list := s.roster.all()
+	public := make([]map[string]any, 0, len(list))
+	for _, c := range list {
+		public = append(public, publicCharacter(c))
 	}
 	writeJSON(w, http.StatusOK, public)
+}
+
+// publicCharacter is what the browser sees of a character: no persona or tools.
+func publicCharacter(c Character) map[string]any {
+	return map[string]any{"id": c.ID, "name": c.Name, "ui": c.UI, "model": choice(c.Provider, c.Model), "models": c.Models, "discretion": discretionOf(c)}
 }
 
 type createConversationRequest struct {
@@ -130,7 +137,7 @@ func (s *server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	if _, ok := s.chars[req.CharacterID]; !ok {
+	if _, ok := s.roster.get(req.CharacterID); !ok {
 		http.Error(w, "unknown character", http.StatusBadRequest)
 		return
 	}
@@ -157,7 +164,7 @@ func (s *server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 
 func (s *server) handleListConversations(w http.ResponseWriter, r *http.Request) {
 	characterID := r.URL.Query().Get("characterId")
-	if _, ok := s.chars[characterID]; !ok {
+	if _, ok := s.roster.get(characterID); !ok {
 		http.Error(w, "unknown character", http.StatusBadRequest)
 		return
 	}
@@ -243,7 +250,7 @@ func (s *server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "get conversation", err)
 		return
 	}
-	c, ok := s.chars[conv.CharacterID]
+	c, ok := s.roster.get(conv.CharacterID)
 	if !ok {
 		http.Error(w, "unknown character", http.StatusBadRequest)
 		return
@@ -293,7 +300,7 @@ func (s *server) handleImportConversation(w http.ResponseWriter, r *http.Request
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	if _, ok := s.chars[req.CharacterID]; !ok {
+	if _, ok := s.roster.get(req.CharacterID); !ok {
 		http.Error(w, "unknown character", http.StatusBadRequest)
 		return
 	}

@@ -180,7 +180,7 @@ func TestMemoryProfileAPI(t *testing.T) {
 // explicitly selected character.
 func TestMemoryScreenIsPerCharacter(t *testing.T) {
 	s, db, mux := newRecordServer(t)
-	s.chars["ria"] = Character{ID: "ria", Name: "Ria"}
+	s.roster.list = append(s.roster.list, Character{ID: "ria", Name: "Ria"})
 	ctx := context.Background()
 
 	assistantFact, err := db.AddFact(ctx, store.Fact{CharacterID: "assistant", Text: "likes black coffee", Category: "preference", ValidFrom: dayOf(2026, 12, 1)})
