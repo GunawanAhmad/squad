@@ -264,6 +264,14 @@ async function forgetWholeDay() {
               <strong>#{{ f.id }}</strong>
               {{ f.text }}
               <span class="muted">({{ f.category }}, {{ f.validFrom }}<template v-if="f.validTo">–{{ f.validTo }}</template>)</span>
+              <span
+                v-if="f.about && f.about !== 'me'"
+                class="muted"
+              > · about {{ f.about }}</span>
+              <span
+                v-if="f.toldBy"
+                class="muted"
+              > · heard from {{ f.toldBy }}</span>
             </div>
             <div class="fact-actions">
               <button
@@ -316,6 +324,14 @@ async function forgetWholeDay() {
               :key="h.id"
             >
               <strong>#{{ h.id }}</strong> {{ h.text }} <span class="muted">({{ h.status }}, {{ h.validFrom }}<template v-if="h.validTo">–{{ h.validTo }}</template>)</span>
+              <span
+                v-if="h.about && h.about !== 'me'"
+                class="muted"
+              > · about {{ h.about }}</span>
+              <span
+                v-if="h.toldBy"
+                class="muted"
+              > · heard from {{ h.toldBy }}</span>
             </li>
           </ol>
         </div>

@@ -869,3 +869,132 @@ main > form .game-btn { width: 40px; height: 40px; border-radius: 12px; }
 @media (max-width: 900px) {
   .memory-grid { grid-template-columns: 1fr; }
 }
+
+/* Rooms: the transcript is a normal chat; the rail shows one chip per room. */
+.rail-room {
+  flex-shrink: 0;
+  width: 48px;
+  height: 40px;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .06);
+  color: var(--text);
+  font: 700 13px var(--display);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color .15s, border-radius .15s;
+}
+
+.rail-room:hover { border-color: rgba(255, 255, 255, .25); }
+
+.rail-room[aria-current="true"] {
+  border-color: var(--accent);
+  border-radius: 14px;
+  box-shadow: 0 0 18px color-mix(in oklab, var(--accent) 50%, transparent);
+}
+
+.rooms {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 980px;
+}
+
+.rooms h2 { margin: 0; font: 600 20px var(--body); }
+.rooms h3 { margin: 0; font: 600 15px var(--body); }
+.rooms-hint { margin: 0; font-size: 13px; }
+
+.room-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.room-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #12121b;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s, transform .15s ease-out;
+}
+
+.room-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, .28);
+}
+
+.room-name { font: 600 16px var(--body); }
+
+.room-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #12121b;
+}
+
+.room-form > label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.room-form input[type="text"] {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0b0b12;
+  color: var(--text);
+  font: inherit;
+}
+
+.room-form fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.room-form legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.member-pick {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+  color: var(--text) !important;
+}
+
+.room-create {
+  align-self: flex-start;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent, #8b7bff);
+  color: #08080d;
+  font: 600 14px var(--body);
+  cursor: pointer;
+}
+
+.room-create:disabled { opacity: .5; cursor: not-allowed; }

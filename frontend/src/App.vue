@@ -5,12 +5,15 @@ import CharacterPortrait from './components/CharacterPortrait.vue';
 import ChatScreen from './components/ChatScreen.vue';
 import HomeScreen from './components/HomeScreen.vue';
 import MemoryScreen from './components/MemoryScreen.vue';
-import type { Character } from './types';
+import RoomScreen from './components/RoomScreen.vue';
+import type { Character, Room } from './types';
 
-type Screen = 'home' | 'chat' | 'memory';
+type Screen = 'home' | 'chat' | 'memory' | 'room';
 const screen = ref<Screen>('home');
 const chars = ref<Character[]>([]);
 const current = ref<Character | null>(null);
+const currentRoom = ref<Room | null>(null);
+const rooms = ref<Room[]>([]);
 let beforeMemory: Screen = 'home';
 
 onMounted(async () => {
@@ -18,7 +21,19 @@ onMounted(async () => {
   window.addEventListener('pointerdown', unlock, { once: true });
   window.addEventListener('keydown', unlock, { once: true });
   chars.value = await (await fetch('/api/characters')).json();
+  try {
+    rooms.value = await (await fetch('/api/rooms')).json();
+  } catch {
+    // The rail still works without the rooms list; a reload retries it.
+  }
 });
+
+function openRoom(r: Room) {
+  play(screen.value === 'home' ? 'lock' : 'tick');
+  if (!rooms.value.some((x) => x.id === r.id)) rooms.value.unshift(r);
+  currentRoom.value = r;
+  screen.value = 'room';
+}
 
 function pick(c: Character) {
   if (screen.value === 'chat' && current.value?.id === c.id) return;
@@ -106,6 +121,20 @@ function toggleMemory() {
           class="mini"
         />
       </button>
+      <template v-if="rooms.length">
+        <span class="rail-sep" />
+        <button
+          v-for="r in rooms"
+          :key="r.id"
+          class="rail-room"
+          :aria-label="r.name"
+          :title="r.name"
+          :aria-current="screen === 'room' && currentRoom?.id === r.id"
+          @click="openRoom(r)"
+        >
+          {{ r.name.slice(0, 2) }}
+        </button>
+      </template>
     </nav>
 
     <Transition
@@ -116,11 +145,19 @@ function toggleMemory() {
         v-if="screen === 'home'"
         :chars="chars"
         @pick="pick"
+        @open-room="openRoom"
       />
       <ChatScreen
         v-else-if="screen === 'chat' && current"
         :key="current.id"
         :character="current"
+        @back="home"
+      />
+      <RoomScreen
+        v-else-if="screen === 'room' && currentRoom"
+        :key="currentRoom.id"
+        :room="currentRoom"
+        :chars="chars"
         @back="home"
       />
       <MemoryScreen

@@ -15,11 +15,16 @@ export interface Message { role: 'user' | 'assistant'; content: string; tools?: 
 
 export interface Conversation { id: string; characterId: string; createdAt: string; updatedAt: string; day?: string }
 
+// A group conversation (handlers_rooms.go). Members are character ids; you are
+// always in it but never listed.
+export interface Room { id: string; name: string; members: string[]; createdAt: string }
+
 // One row from GET /api/conversations/{id}/messages.
 export interface StoredMessage {
   id: number;
   role: 'user' | 'assistant' | 'tool' | 'trigger';
   content: string;
+  speaker?: string; // who said it in a room: a character id or 'me'
   createdAt: string;
   toolCalls?: { id: string; name: string; arguments: string }[];
   toolCallId?: string;
@@ -33,7 +38,8 @@ export type StreamEvent =
   | { type: 'text'; delta: string }
   | { type: 'tool'; name: string; args: string; id?: number }
   | { type: 'error'; message: string }
-  | { type: 'done'; runId: number; userMessageId: number; assistantMessageId: number };
+  | { type: 'speaker'; name: string } // room: a new character bubble starts
+  | { type: 'done'; runId?: number; userMessageId?: number; assistantMessageId?: number };
 
 // Phase 1: the daily loop (handlers_records.go, handlers_due.go).
 export interface Task {
@@ -64,6 +70,7 @@ export interface Fact {
   id: number; text: string; category: string; core: boolean;
   status: 'active' | 'superseded' | 'forgotten';
   sourceKind: string; validFrom: string; validTo?: string;
+  about: string; toldBy?: string; // who it is about (an id or 'me') and who said it
   supersededBy?: number; sourceMessageId?: number; useCount: number; createdAt: string;
 }
 export interface MemoryHit {
