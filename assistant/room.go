@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 
-	"squad/llm"
 	"squad/store"
 )
 
@@ -105,7 +103,7 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 	lock.Lock()
 	defer lock.Unlock()
 
-	meID := store.RoomConversationID(req.Room.ID, store.UserSpeaker)
+	userCopyID := store.RoomConversationID(req.Room.ID, store.UserSpeaker)
 	names := map[string]string{store.UserSpeaker: "the user"}
 	for _, m := range req.Members {
 		names[m.ID] = m.Name
@@ -113,7 +111,7 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 
 	first := NextSpeaker(req.Input, req.Members, "")
 	if first == "" {
-		first = r.lastSpeaker(ctx, meID, req.Members)
+		first = r.lastSpeaker(ctx, userCopyID, req.Members)
 	}
 	if first == "" {
 		first = req.Members[0].ID
@@ -129,7 +127,7 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 			return err
 		}
 	}
-	if err := r.addRoomMessage(ctx, meID, "user", req.Input, store.UserSpeaker); err != nil {
+	if err := r.addRoomMessage(ctx, userCopyID, "user", req.Input, store.UserSpeaker); err != nil {
 		return err
 	}
 
@@ -161,7 +159,7 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 			// Everyone still hears the words that were said before the failure;
 			// nobody speaks next.
 			if result != "" {
-				if fanOutErr := r.fanOutRoom(ctx, meID, req.Room.ID, req.Members, speaker, "", result); fanOutErr != nil {
+				if fanOutErr := r.fanOutRoom(ctx, userCopyID, req.Room.ID, req.Members, speaker, "", result); fanOutErr != nil {
 					return fanOutErr
 				}
 			}
@@ -175,11 +173,11 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 		// Only the next speaker's Turn stores the text as its input. At the cap
 		// nobody runs that Turn, so everyone must get the copy now.
 		more := next != "" && turn < maxRoomTurns-1
-		skip := ""
+		inputOwner := ""
 		if more {
-			skip = next
+			inputOwner = next
 		}
-		if err := r.fanOutRoom(ctx, meID, req.Room.ID, req.Members, speaker, skip, result); err != nil {
+		if err := r.fanOutRoom(ctx, userCopyID, req.Room.ID, req.Members, speaker, inputOwner, result); err != nil {
 			return err
 		}
 		if !more {
@@ -192,13 +190,13 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 
 // fanOutRoom writes one reply into the user's transcript (as the character)
 // and into every member's copy except the speaker's (its Turn already stored
-// it) and skip (the member whose Turn will store it as its input).
-func (r *Runner) fanOutRoom(ctx context.Context, meID, roomID string, members []Member, speaker, skip, text string) error {
-	if err := r.addRoomMessage(ctx, meID, "assistant", text, speaker); err != nil {
+// it) and inputOwner (the member whose Turn will store it as its input).
+func (r *Runner) fanOutRoom(ctx context.Context, userCopyID, roomID string, members []Member, speaker, inputOwner, text string) error {
+	if err := r.addRoomMessage(ctx, userCopyID, "assistant", text, speaker); err != nil {
 		return err
 	}
 	for _, m := range members {
-		if m.ID == speaker || m.ID == skip {
+		if m.ID == speaker || m.ID == inputOwner {
 			continue
 		}
 		if err := r.addRoomMessage(ctx, store.RoomConversationID(roomID, m.ID), "user", text, speaker); err != nil {
@@ -209,8 +207,8 @@ func (r *Runner) fanOutRoom(ctx context.Context, meID, roomID string, members []
 }
 
 // lastSpeaker is the latest character that spoke in the user's copy, or "".
-func (r *Runner) lastSpeaker(ctx context.Context, meID string, members []Member) string {
-	id, err := r.store.LastSpeaker(ctx, meID)
+func (r *Runner) lastSpeaker(ctx context.Context, userCopyID string, members []Member) string {
+	id, err := r.store.LastSpeaker(ctx, userCopyID)
 	if err != nil {
 		return ""
 	}
@@ -218,56 +216,6 @@ func (r *Runner) lastSpeaker(ctx context.Context, meID string, members []Member)
 		return id
 	}
 	return ""
-}
-
-// roomGate builds the character's private candidates (its core facts plus the
-// pre-retrieval hits) and asks the share gate which may be said in front of the
-// listeners. It always fails closed: on any error nothing is shared.
-func (r *Runner) roomGate(ctx context.Context, char Character, listeners []string, question, modelName string, set Settings, retrieved []Retrieved) ([]Retrieved, *gateTrace, llm.Usage) {
-	var candidates []Retrieved
-	if searcher, ok := r.store.(Searcher); ok && char.hasMemory() {
-		facts, err := searcher.CoreFacts(ctx, char.ID, 20)
-		if err != nil {
-			log.Printf("assistant: room core facts: %v", err)
-		}
-		seen := map[string]bool{}
-		add := func(item Retrieved) {
-			key := candidateKey(item)
-			if !seen[key] {
-				seen[key] = true
-				candidates = append(candidates, item)
-			}
-		}
-		for _, f := range facts {
-			add(Retrieved{Kind: "fact", ID: f.ID, When: store.DayString(f.ValidFrom), Who: f.Category, Text: f.Text})
-		}
-		for _, hit := range retrieved {
-			add(hit)
-		}
-	}
-
-	gateID := r.gateModel
-	if set.JobsModel != "" {
-		gateID = set.JobsModel
-	}
-	if gateID == "" {
-		gateID = modelName // the character's resolved model
-	}
-	gateClient, err := r.modelFor(string(llm.OpenCodeProvider))
-	if err != nil {
-		log.Printf("assistant: share gate: %v", err)
-		return nil, &gateTrace{Err: err.Error(), KeptIDs: candidateKeys(candidates)}, llm.Usage{}
-	}
-	res, usage := Gate(ctx, GateInput{
-		Model: gateClient, ModelID: gateID, Character: char,
-		Listeners: listeners, Question: question, Candidates: candidates,
-	})
-	trace := &gateTrace{SharedIDs: candidateKeys(res.Shared), KeptIDs: candidateKeys(res.Kept), Err: res.Err}
-	if res.Err != "" {
-		log.Printf("assistant: share gate failed closed: %s", res.Err)
-	}
-	touchFacts(ctx, r.store, res.Shared)
-	return res.Shared, trace, usage
 }
 
 func (r *Runner) addRoomMessage(ctx context.Context, conversationID, role, content, speaker string) error {

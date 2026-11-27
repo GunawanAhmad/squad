@@ -107,8 +107,6 @@ func readProfile() string {
 	return string(raw)
 }
 
-// factSuffix says who a fact is about and where it came from, when that is not
-// the user speaking about themselves.
 // profilePrompt is the room-mode memory block: profile.md only. The user wrote
 // it for everyone, so it is not gated by the share gate.
 func profilePrompt() string {

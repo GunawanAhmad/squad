@@ -253,8 +253,6 @@ const closeSystemRules = `Rules:
 - about: "me" when the fact is about the user. When another character in a room says something about the user or themselves, use that character's id instead.
 - source_message_id: the #id of the message this fact came from, copied from the message lines; omit it if unclear.`
 
-// closeFactSuffix names who a fact is about and who said it, so the model can
-// supersede the right row without inventing provenance.
 func closePrompt(characterID string, day time.Time, set Settings, msgs []store.DayMessage, facts []store.Fact) (string, bool) {
 	var b strings.Builder
 	truncated := false
@@ -314,6 +312,7 @@ func validateCloseDoc(raw json.RawMessage, characterID string, existing []store.
 	validSource := map[int64]bool{}
 	allowedAbout := map[string]bool{store.UserSpeaker: true}
 	speakerOf := map[int64]string{}
+	roomDay := false
 	for _, m := range msgs {
 		if m.CharacterID != characterID {
 			continue
@@ -323,6 +322,7 @@ func validateCloseDoc(raw json.RawMessage, characterID string, existing []store.
 			speakerOf[m.ID] = m.Speaker
 			if m.Speaker != store.UserSpeaker {
 				allowedAbout[m.Speaker] = true
+				roomDay = true
 			}
 		}
 	}
@@ -375,6 +375,13 @@ func validateCloseDoc(raw json.RawMessage, characterID string, existing []store.
 		}
 		if item.SourceMessageID != nil && !validSource[*item.SourceMessageID] {
 			rejects = append(rejects, fmt.Sprintf("item %d: source_message_id %d is not from this day", i, *item.SourceMessageID))
+			continue
+		}
+		// In a room the provenance matters: without a source message we cannot
+		// tell the user's words from another character's, so the fact is
+		// refused rather than recorded as "came from the user".
+		if roomDay && item.SourceMessageID == nil {
+			rejects = append(rejects, fmt.Sprintf("item %d: source_message_id is required on a room day", i))
 			continue
 		}
 		about := strings.TrimSpace(item.About)

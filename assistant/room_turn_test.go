@@ -232,3 +232,40 @@ func TestRoomTurnHasNoDailyRecords(t *testing.T) {
 		t.Fatalf("the assistant's day leaked into a room:\n%s", system)
 	}
 }
+
+func TestRoomGateKeepsFactProvenance(t *testing.T) {
+	db := storetest.New(t)
+	ctx := context.Background()
+	f, err := db.AddFact(ctx, store.Fact{
+		CharacterID: "socrates", Text: "is behind on the thesis", Category: "work",
+		Core: true, About: "ria", ToldBy: "socrates",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := llm.NewFake(
+		llm.FakeStep{Text: fmt.Sprintf(`{"share":["f%d"]}`, f.ID)},
+		llm.FakeStep{Text: "They mention a thesis."},
+	)
+	r := roomRunner(t, db, fake, func() string { return "" })
+	char := Character{ID: "socrates", Name: "Socrates", Provider: "opencode", Model: "fake",
+		Persona: "You are Socrates.", Context: "memory", Tools: []string{"remember"}}
+	if _, err := r.Turn(ctx, TurnRequest{
+		ConversationID: "room:abc:socrates", Character: char, Input: "what's up with the user?",
+		Speaker: "ria", Listeners: []string{"Ria"},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	reqs := fake.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests: %d", len(reqs))
+	}
+	for name, text := range map[string]string{
+		"gate":   reqs[0].Messages[0].Content,
+		"prompt": reqs[1].System,
+	} {
+		if !strings.Contains(text, "about ria") || !strings.Contains(text, "heard from socrates") {
+			t.Fatalf("%s lost the fact's provenance:\n%s", name, text)
+		}
+	}
+}

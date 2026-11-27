@@ -16,6 +16,9 @@ import (
 // (`me`) is the transcript the UI shows; each member keeps its own copy in the
 // store, which is what keeps memory and forget per character.
 
+// maxRoomName matches the rooms.name CHECK in the migration.
+const maxRoomName = 60
+
 type createRoomRequest struct {
 	Name    string   `json:"name"`
 	Members []string `json:"members"`
@@ -28,7 +31,7 @@ func (s *server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(req.Name)
-	if name == "" || utf8.RuneCountInString(name) > 60 {
+	if name == "" || utf8.RuneCountInString(name) > maxRoomName {
 		http.Error(w, "bad name", http.StatusBadRequest)
 		return
 	}
@@ -108,7 +111,7 @@ func (s *server) handlePostRoomMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(req.Content) == "" || len(req.Content) > 50_000 {
+	if strings.TrimSpace(req.Content) == "" || len(req.Content) > maxMessageChars {
 		http.Error(w, "bad content", http.StatusBadRequest)
 		return
 	}

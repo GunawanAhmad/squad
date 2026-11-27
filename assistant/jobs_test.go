@@ -510,21 +510,7 @@ func TestCloseSetsToldByFromSpeaker(t *testing.T) {
 	fake := llm.NewFake(llm.FakeStep{Text: `{"facts":[
 		{"op":"ADD","text":"is behind on the thesis","category":"work","about":"me","told_by":"assistant","source_message_id":` + strconv.FormatInt(src.ID, 10) + `}
 	]}`})
-	runner := New(Config{
-		Store: st, Tools: nil, DB: st,
-		Models:   map[string]llm.Model{string(llm.OpenCodeProvider): fake},
-		Now:      func() time.Time { return now },
-		Location: testLoc,
-		Settings: func(context.Context) Settings {
-			return Settings{TZ: "Asia/Makassar", Loc: testLoc, DayStartsAt: 4 * time.Hour, MorningAt: 8 * time.Hour, EveningAt: 21 * time.Hour}
-		},
-	})
-	e := &Engine{Store: st, Runner: runner, Now: func() time.Time { return now },
-		Char: Character{ID: "socrates", Name: "Socrates", Provider: "opencode", Model: "fake", Persona: "You are Socrates.", Context: "memory"},
-		Setting: func(context.Context) Settings {
-			return Settings{TZ: "Asia/Makassar", Loc: testLoc, DayStartsAt: 4 * time.Hour, MorningAt: 8 * time.Hour, EveningAt: 21 * time.Hour}
-		},
-	}
+	e := closeEngineFor(t, st, fake, "socrates", now)
 	markClosed(t, e, today, 2, 7)
 
 	plan, err := e.Decide(ctx, now)
@@ -549,6 +535,65 @@ func TestCloseSetsToldByFromSpeaker(t *testing.T) {
 	prompt := fake.Requests()[0].Messages[0].Content
 	if !strings.Contains(prompt, "[#"+strconv.FormatInt(src.ID, 10)+"] [05:00] ria:") {
 		t.Fatalf("close prompt does not name the speaker:\n%s", prompt)
+	}
+}
+
+// closeEngineFor builds a close-job engine for a persona's room day.
+func closeEngineFor(t *testing.T, st *store.Store, fake *llm.Fake, charID string, now time.Time) *Engine {
+	t.Helper()
+	settings := func(context.Context) Settings {
+		return Settings{TZ: "Asia/Makassar", Loc: testLoc, DayStartsAt: 4 * time.Hour, MorningAt: 8 * time.Hour, EveningAt: 21 * time.Hour}
+	}
+	runner := New(Config{
+		Store: st, Tools: nil, DB: st,
+		Models:   map[string]llm.Model{string(llm.OpenCodeProvider): fake},
+		Now:      func() time.Time { return now },
+		Location: testLoc,
+		Settings: settings,
+	})
+	return &Engine{Store: st, Runner: runner, Now: func() time.Time { return now },
+		Char: Character{ID: charID, Name: charID, Provider: "opencode", Model: "fake",
+			Persona: "You are " + charID + ".", Context: "memory"},
+		Setting: settings,
+	}
+}
+
+func TestCloseRejectsSourcelessRoomFact(t *testing.T) {
+	now := local(9, 0)
+	ctx := context.Background()
+	st := storetest.New(t)
+	today := LogicalDay(now, testLoc, 4*time.Hour)
+	yesterday := today.AddDate(0, 0, -1)
+	if _, err := st.CreateConversation(ctx, store.Conversation{ID: "room:abc:socrates", CharacterID: "socrates"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddMessageAt(ctx, store.Message{
+		ConversationID: "room:abc:socrates", Role: "user", Speaker: "ria",
+		Content: "The user is behind on the thesis.",
+	}, At(yesterday, 5*time.Hour, testLoc)); err != nil {
+		t.Fatal(err)
+	}
+	fake := llm.NewFake(llm.FakeStep{Text: `{"facts":[
+		{"op":"ADD","text":"is behind on the thesis","category":"work","about":"me"}
+	]}`})
+	e := closeEngineFor(t, st, fake, "socrates", now)
+	markClosed(t, e, today, 2, 7)
+
+	plan, err := e.Decide(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.ExecuteJobs(ctx, plan)
+
+	if facts, _ := st.Facts(ctx, "socrates", store.FactFilter{Status: []string{"active"}}); len(facts) != 0 {
+		t.Fatalf("a sourceless room fact was applied: %+v", facts)
+	}
+	all, err := st.RunsByKind(ctx, "close")
+	if err != nil || len(all) != 1 {
+		t.Fatalf("runs: %+v, %v", all, err)
+	}
+	if !strings.Contains(string(all[0].Context), "source_message_id is required") {
+		t.Fatalf("reject not recorded: %s", all[0].Context)
 	}
 }
 

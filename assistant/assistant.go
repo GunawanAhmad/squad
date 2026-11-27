@@ -546,40 +546,6 @@ type contextTrace struct {
 	GateError           string   `json:"gate_error,omitempty"`
 }
 
-// gateTrace is what a room turn records about the share gate.
-type gateTrace struct {
-	SharedIDs []string
-	KeptIDs   []string
-	Err       string
-}
-
-// candidateKeys names candidates the way the gate prompt does (f12, m34).
-func candidateKeys(items []Retrieved) []string {
-	out := make([]string, 0, len(items))
-	for _, it := range items {
-		out = append(out, candidateKey(it))
-	}
-	return out
-}
-
-// touchFacts counts the facts a room turn actually put in front of the model.
-func touchFacts(ctx context.Context, st Store, items []Retrieved) {
-	var ids []int64
-	for _, it := range items {
-		if it.Kind == "fact" {
-			ids = append(ids, it.ID)
-		}
-	}
-	if len(ids) == 0 {
-		return
-	}
-	if s, ok := st.(Searcher); ok {
-		if err := s.TouchFacts(ctx, ids); err != nil {
-			log.Printf("assistant: touch gated facts: %v", err)
-		}
-	}
-}
-
 func summaryUpto(c store.Conversation) int64 {
 	if c.SummaryUpto == nil {
 		return 0

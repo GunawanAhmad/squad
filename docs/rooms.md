@@ -55,6 +55,16 @@ part of this work.
    when it came from you. The server takes `told_by` from the source
    message's speaker and never trusts the model for it.
 
+## Built notes
+
+Two privacy choices go slightly beyond the rules above, because both would
+otherwise bypass the gate: a room turn does not load the Assistant's day
+records, and it removes the tools that read them (`get_overview`,
+`get_summary`, `query_activities`, `list_tasks`, `list_reminders`) along with
+`recall`. Room turns also carry a short `<room>` note that tells the character
+how @mention hands the turn on. On a room day the close job refuses a fact with
+no `source_message_id`, so `told_by` is never guessed.
+
 ## Verified
 
 `make test` covers the room store, turn-taking, fan-out, the gate, the API and

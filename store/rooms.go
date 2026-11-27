@@ -80,30 +80,33 @@ func newRoomID() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-// GetRoom returns one room, ErrNotFound when it does not exist.
-func (s *Store) GetRoom(ctx context.Context, id string) (Room, error) {
+const roomCols = `id, name, members, created_at`
+
+func scanRoom(row pgx.Row) (Room, error) {
 	var r Room
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, name, members, created_at FROM rooms WHERE id = $1`, id).
-		Scan(&r.ID, &r.Name, &r.Members, &r.CreatedAt)
+	err := row.Scan(&r.ID, &r.Name, &r.Members, &r.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Room{}, ErrNotFound
 	}
 	return r, err
 }
 
+// GetRoom returns one room, ErrNotFound when it does not exist.
+func (s *Store) GetRoom(ctx context.Context, id string) (Room, error) {
+	return scanRoom(s.pool.QueryRow(ctx, `SELECT `+roomCols+` FROM rooms WHERE id = $1`, id))
+}
+
 // ListRooms returns every room, newest first.
 func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, members, created_at FROM rooms ORDER BY created_at DESC, id DESC`)
+	rows, err := s.pool.Query(ctx, `SELECT `+roomCols+` FROM rooms ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Room
 	for rows.Next() {
-		var r Room
-		if err := rows.Scan(&r.ID, &r.Name, &r.Members, &r.CreatedAt); err != nil {
+		r, err := scanRoom(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, r)

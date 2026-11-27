@@ -33,6 +33,9 @@ type apiStore interface {
 
 var conversationIDRe = regexp.MustCompile(`^[A-Za-z0-9:_-]{1,80}$`)
 
+// maxMessageChars is the largest message the API accepts.
+const maxMessageChars = 50_000
+
 type server struct {
 	chars     map[string]Character
 	list      []Character
@@ -224,7 +227,7 @@ func (s *server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(req.Content) == "" || len(req.Content) > 50_000 {
+	if strings.TrimSpace(req.Content) == "" || len(req.Content) > maxMessageChars {
 		http.Error(w, "bad content", http.StatusBadRequest)
 		return
 	}
@@ -301,7 +304,7 @@ func (s *server) handleImportConversation(w http.ResponseWriter, r *http.Request
 		return
 	}
 	for _, m := range req.Messages {
-		if (m.Role != "user" && m.Role != "assistant") || len(m.Content) > 50_000 {
+		if (m.Role != "user" && m.Role != "assistant") || len(m.Content) > maxMessageChars {
 			http.Error(w, "bad message", http.StatusBadRequest)
 			return
 		}
