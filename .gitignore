@@ -8,3 +8,4 @@ characters
 node_modules/
 /backups
 /.tmp/
+/docs/

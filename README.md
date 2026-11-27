@@ -228,7 +228,6 @@ Don't rename an `id` later: its chats and facts stay under the old one.
 | `store/` | Postgres access and numbered migrations (`store/migrations/`). |
 | `eval/` | Model evals for tool use, memory, grounding and the room share gate. These spend real API credit. |
 | `frontend/` | Vue app: character home, rooms, chat with a character rail, and the Memory screen. It builds into `web/`, which the binary embeds. |
-| `docs/` | `assistant-roadmap.md` (design decisions and what was verified), `memory-research.md`. |
 
 ## Tests and evals
 
