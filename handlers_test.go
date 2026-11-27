@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -24,12 +25,48 @@ type memStore struct {
 	msgs     []store.Message
 	runs     []store.Run
 	calls    []store.ToolCall
+	rooms    map[string]store.Room
 	nextMsg  int64
 	nextRun  int64
 	nextCall int64
 }
 
-func newMemStore() *memStore { return &memStore{convs: map[string]store.Conversation{}} }
+func newMemStore() *memStore {
+	return &memStore{convs: map[string]store.Conversation{}, rooms: map[string]store.Room{}}
+}
+
+func (m *memStore) CreateRoom(_ context.Context, name string, members []string) (store.Room, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r := store.Room{ID: fmt.Sprintf("%08x", len(m.rooms)+1), Name: name, Members: members, CreatedAt: time.Now()}
+	m.rooms[r.ID] = r
+	for _, p := range append(append([]string(nil), members...), "me") {
+		id := store.RoomConversationID(r.ID, p)
+		m.convs[id] = store.Conversation{ID: id, CharacterID: p, CreatedAt: r.CreatedAt, UpdatedAt: r.CreatedAt}
+	}
+	return r, nil
+}
+
+func (m *memStore) GetRoom(_ context.Context, id string) (store.Room, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.rooms[id]
+	if !ok {
+		return store.Room{}, store.ErrNotFound
+	}
+	return r, nil
+}
+
+func (m *memStore) ListRooms(_ context.Context) ([]store.Room, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []store.Room
+	for _, r := range m.rooms {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
 
 func (m *memStore) CreateConversation(_ context.Context, c store.Conversation) (store.Conversation, error) {
 	m.mu.Lock()

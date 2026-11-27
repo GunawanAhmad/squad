@@ -26,6 +26,9 @@ type apiStore interface {
 	GetConversation(ctx context.Context, id string) (store.Conversation, error)
 	ListConversations(ctx context.Context, characterID string, limit int) ([]store.Conversation, error)
 	Messages(ctx context.Context, conversationID string, after int64, limit int) ([]store.Message, error)
+	CreateRoom(ctx context.Context, name string, members []string) (store.Room, error)
+	GetRoom(ctx context.Context, id string) (store.Room, error)
+	ListRooms(ctx context.Context) ([]store.Room, error)
 }
 
 var conversationIDRe = regexp.MustCompile(`^[A-Za-z0-9:_-]{1,80}$`)
@@ -73,6 +76,11 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/conversations/import", s.handleImportConversation)
 	mux.HandleFunc("GET /api/conversations/{id}/messages", s.handleMessages)
 	mux.HandleFunc("POST /api/conversations/{id}/messages", s.handlePostMessage)
+
+	mux.HandleFunc("POST /api/rooms", s.handleCreateRoom)
+	mux.HandleFunc("GET /api/rooms", s.handleListRooms)
+	mux.HandleFunc("GET /api/rooms/{id}/messages", s.handleRoomMessages)
+	mux.HandleFunc("POST /api/rooms/{id}/messages", s.handlePostRoomMessage)
 
 	mux.HandleFunc("GET /api/assistant/tasks", s.handleListTasks)
 	mux.HandleFunc("PATCH /api/assistant/tasks/{id}", s.handlePatchTask)
@@ -401,6 +409,9 @@ func messageJSON(m store.Message) map[string]any {
 	}
 	if m.RunID != nil {
 		out["runId"] = *m.RunID
+	}
+	if m.Speaker != "" {
+		out["speaker"] = m.Speaker
 	}
 	return out
 }
