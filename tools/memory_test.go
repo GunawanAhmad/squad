@@ -266,4 +266,12 @@ func TestRememberAboutMustBeAParticipant(t *testing.T) {
 		!strings.Contains(err.Error(), "about must be") {
 		t.Fatalf("unknown about: %v", err)
 	}
+
+	// The same words about two different people are two different facts.
+	runTool(t, env, "remember", `{"text":"likes tea","about":"me"}`)
+	runTool(t, env, "remember", `{"text":"likes tea","about":"ria"}`)
+	facts, err = db.Facts(ctx, "assistant", store.FactFilter{Status: []string{"active"}})
+	if err != nil || len(facts) != 3 {
+		t.Fatalf("facts about different people: %+v, %v", facts, err)
+	}
 }

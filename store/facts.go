@@ -53,7 +53,7 @@ func (f Fact) Provenance() string {
 	if f.About != "" && f.About != UserSpeaker {
 		parts = append(parts, "about "+f.About)
 	}
-	if f.ToldBy != "" {
+	if f.ToldBy != "" && f.ToldBy != f.About {
 		parts = append(parts, "heard from "+f.ToldBy)
 	}
 	return strings.Join(parts, ", ")

@@ -107,3 +107,24 @@ func TestFactAboutAndToldBy(t *testing.T) {
 		t.Fatalf("about/told_by: %+v", found)
 	}
 }
+
+func TestFactProvenance(t *testing.T) {
+	cases := []struct {
+		name string
+		fact store.Fact
+		want string
+	}{
+		{"plain user fact", store.Fact{About: "me"}, ""},
+		{"about someone", store.Fact{About: "ria"}, "about ria"},
+		{"heard from someone", store.Fact{About: "me", ToldBy: "socrates"}, "heard from socrates"},
+		{"about the speaker", store.Fact{About: "ria", ToldBy: "ria"}, "about ria"},
+		{"both", store.Fact{About: "ria", ToldBy: "socrates"}, "about ria, heard from socrates"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.fact.Provenance(); got != tc.want {
+				t.Fatalf("Provenance() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

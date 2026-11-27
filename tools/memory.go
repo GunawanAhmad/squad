@@ -50,7 +50,7 @@ func AddFact(ctx context.Context, db *store.Store, f store.Fact) (store.Fact, er
 		return store.Fact{}, err
 	}
 	for _, old := range existing {
-		if strings.EqualFold(old.Text, f.Text) {
+		if old.About == f.About && strings.EqualFold(old.Text, f.Text) {
 			return store.Fact{}, fmt.Errorf("%w: already known as fact #%d", ErrConflict, old.ID)
 		}
 	}
@@ -113,7 +113,7 @@ func FactLine(f store.Fact) string {
 func rememberTool() *Tool {
 	return &Tool{
 		Name: "remember",
-		Description: "Store a durable fact about the user, or in a room about another member (preference, person, circumstance, goal, work, health). " +
+		Description: "Store a durable fact about the user or a member present (preference, person, circumstance, goal, work, health). " +
 			"Use supersedes when a fact changes (\"I moved to Jakarta\" supersedes \"lives in Bali\"): the old fact keeps its history. " +
 			"Never store guesses or things the user did not say.",
 		Parameters: map[string]any{
@@ -159,7 +159,7 @@ func rememberTool() *Tool {
 				allowed = []string{store.UserSpeaker, env.CharacterID}
 			}
 			if !slices.Contains(allowed, about) {
-				return Result{}, fmt.Errorf("about must be me or one of: %s", strings.Join(allowed, ", "))
+				return Result{}, fmt.Errorf("about must be one of: %s", strings.Join(allowed, ", "))
 			}
 			fact, err := AddFact(ctx, env.DB, store.Fact{
 				CharacterID: env.CharacterID, Text: args.Text, Category: args.Category, Core: args.Core,
