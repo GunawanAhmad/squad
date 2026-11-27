@@ -109,14 +109,10 @@ func Retrieve(ctx context.Context, s Searcher, characterID, query string, loc *t
 // factWho is the fact's category plus who it is about and who said it, so a
 // quoted fact is never mistaken for something the user said here.
 func factWho(f store.Fact) string {
-	who := f.Category
-	if f.About != "" && f.About != "me" {
-		who += ", about " + f.About
+	if p := f.Provenance(); p != "" {
+		return f.Category + ", " + p
 	}
-	if f.ToldBy != "" {
-		who += ", heard from " + f.ToldBy
-	}
-	return who
+	return f.Category
 }
 
 // recallPrompt renders the hits as quoted data in a tag of its own.

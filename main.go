@@ -149,10 +149,7 @@ func main() {
 		}
 		engine = &assistant.Engine{
 			Store: db, Runner: runner, Now: assistant.Now, MemoryEnabled: memoryEnabled(chars),
-			Char: assistant.Character{
-				ID: c.ID, Name: c.Name, Provider: provider, Model: model,
-				Persona: c.Persona, Tools: c.Tools, Context: c.Context, Daily: true, Discretion: discretionOf(c),
-			},
+			Char:    toAssistantCharacter(c, provider, model),
 			Setting: func(ctx context.Context) assistant.Settings { return assistant.LoadSettings(ctx, db) },
 			Before:  func(ctx context.Context, now time.Time) { backup.Maybe(ctx, now) },
 		}
@@ -190,6 +187,17 @@ func devUI(target *url.URL, fallback http.Handler) http.Handler {
 		fallback.ServeHTTP(w, r)
 	}
 	return proxy
+}
+
+// toAssistantCharacter maps a configured character to the turn runner's view.
+// Every turn request (1:1, daily, room) goes through here so a new field is
+// wired in one place.
+func toAssistantCharacter(c Character, provider, model string) assistant.Character {
+	return assistant.Character{
+		ID: c.ID, Name: c.Name, Provider: provider, Model: model, Persona: c.Persona,
+		Tools: c.Tools, Context: c.Context, Daily: c.ID == assistantCharacterID,
+		Discretion: discretionOf(c),
+	}
 }
 
 // gateModel is the model id the room share gate runs with: the assistant's

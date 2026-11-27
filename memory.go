@@ -110,14 +110,10 @@ func readProfile() string {
 // factSuffix says who a fact is about and where it came from, when that is not
 // the user speaking about themselves.
 func factSuffix(f store.Fact) string {
-	out := ""
-	if f.About != "" && f.About != "me" {
-		out += " (about " + f.About + ")"
+	if p := f.Provenance(); p != "" {
+		return " (" + p + ")"
 	}
-	if f.ToldBy != "" {
-		out += " (heard from " + f.ToldBy + ")"
-	}
-	return out
+	return ""
 }
 
 // profilePrompt is the room-mode memory block: profile.md only. The user wrote

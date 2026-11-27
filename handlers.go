@@ -252,12 +252,9 @@ func (s *server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	stream := newStream(w)
 	res, err := s.runner.Turn(r.Context(), assistant.TurnRequest{
 		ConversationID: conv.ID,
-		Character: assistant.Character{
-			ID: c.ID, Name: c.Name, Provider: provider, Model: model, Persona: c.Persona, Tools: c.Tools,
-			Context: c.Context, Daily: c.ID == assistantCharacterID, Discretion: discretionOf(c),
-		},
-		Input: req.Content,
-		Model: model,
+		Character:      toAssistantCharacter(c, provider, model),
+		Input:          req.Content,
+		Model:          model,
 	}, stream.event)
 	if err != nil {
 		if r.Context().Err() == nil {

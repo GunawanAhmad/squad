@@ -35,7 +35,7 @@ func (s *server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	var members []string
 	seen := map[string]bool{}
 	for _, id := range req.Members {
-		if id == "me" {
+		if id == store.UserSpeaker {
 			http.Error(w, "me cannot be a member", http.StatusBadRequest)
 			return
 		}
@@ -126,12 +126,7 @@ func (s *server) handlePostRoomMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		members = append(members, assistant.Member{
-			ID: c.ID, Name: c.Name,
-			Character: assistant.Character{
-				ID: c.ID, Name: c.Name, Provider: provider, Model: model, Persona: c.Persona,
-				Tools: c.Tools, Context: c.Context, Daily: c.ID == assistantCharacterID,
-				Discretion: discretionOf(c),
-			},
+			ID: c.ID, Name: c.Name, Character: toAssistantCharacter(c, provider, model),
 		})
 	}
 

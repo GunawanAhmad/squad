@@ -256,14 +256,10 @@ const closeSystemRules = `Rules:
 // closeFactSuffix names who a fact is about and who said it, so the model can
 // supersede the right row without inventing provenance.
 func closeFactSuffix(f store.Fact) string {
-	out := ""
-	if f.About != "" && f.About != "me" {
-		out += " (about " + f.About + ")"
+	if p := f.Provenance(); p != "" {
+		return " (" + p + ")"
 	}
-	if f.ToldBy != "" {
-		out += " (heard from " + f.ToldBy + ")"
-	}
-	return out
+	return ""
 }
 
 func closePrompt(characterID string, day time.Time, set Settings, msgs []store.DayMessage, facts []store.Fact) (string, bool) {
@@ -323,7 +319,7 @@ func validateCloseDoc(raw json.RawMessage, characterID string, existing []store.
 		return nil, []string{"document: " + err.Error()}
 	}
 	validSource := map[int64]bool{}
-	allowedAbout := map[string]bool{"me": true}
+	allowedAbout := map[string]bool{store.UserSpeaker: true}
 	speakerOf := map[int64]string{}
 	for _, m := range msgs {
 		if m.CharacterID != characterID {
@@ -390,7 +386,7 @@ func validateCloseDoc(raw json.RawMessage, characterID string, existing []store.
 		}
 		about := strings.TrimSpace(item.About)
 		if about == "" {
-			about = "me"
+			about = store.UserSpeaker
 		}
 		if !allowedAbout[about] {
 			rejects = append(rejects, fmt.Sprintf("item %d: about %q is not a speaker today", i, item.About))
@@ -400,7 +396,7 @@ func validateCloseDoc(raw json.RawMessage, characterID string, existing []store.
 		// message ("" when the user said it).
 		toldBy := ""
 		if item.SourceMessageID != nil {
-			if sp := speakerOf[*item.SourceMessageID]; sp != "" && sp != "me" {
+			if sp := speakerOf[*item.SourceMessageID]; sp != "" && sp != store.UserSpeaker {
 				toldBy = sp
 			}
 		}

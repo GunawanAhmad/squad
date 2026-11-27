@@ -51,7 +51,7 @@ func AddFact(ctx context.Context, db *store.Store, characterID, text, category s
 		}
 	}
 	if about == "" {
-		about = "me"
+		about = store.UserSpeaker
 	}
 	return db.AddFact(ctx, store.Fact{
 		CharacterID: characterID, Text: text, Category: category, Core: core, SourceKind: sourceKind,
@@ -153,10 +153,10 @@ func rememberTool() *Tool {
 			// told_by comes from who spoke, never from the model: a fact heard
 			// from another character in a room says so.
 			toldBy := ""
-			if env.Speaker != "" && env.Speaker != "me" {
+			if env.Speaker != "" && env.Speaker != store.UserSpeaker {
 				toldBy = env.Speaker
 			}
-			fact, err := AddFact(ctx, env.DB, env.CharacterID, args.Text, args.Category, args.Core, "tool", env.SourceMessageID, recordToday(env), nil, "me", toldBy)
+			fact, err := AddFact(ctx, env.DB, env.CharacterID, args.Text, args.Category, args.Core, "tool", env.SourceMessageID, recordToday(env), nil, store.UserSpeaker, toldBy)
 			if err != nil {
 				if errors.Is(err, ErrConflict) {
 					return text(err.Error() + "; no new fact stored"), nil

@@ -517,3 +517,35 @@ func TestTurnStoresSpeaker(t *testing.T) {
 		t.Fatalf("live input label: %q", last.Content)
 	}
 }
+
+func TestTurnTextIsTerminalAnswer(t *testing.T) {
+	cases := []struct {
+		name  string
+		steps []llm.FakeStep
+		want  string
+	}{
+		{"preamble before a tool is not the reply", []llm.FakeStep{
+			{Text: "Let me look.", ToolCalls: []llm.ToolCall{{ID: "t1", Name: "echo", Arguments: `{}`}}},
+			{Text: ""},
+		}, ""},
+		{"the closing step is the reply", []llm.FakeStep{
+			{Text: "Let me look.", ToolCalls: []llm.ToolCall{{ID: "t1", Name: "echo", Arguments: `{}`}}},
+			{Text: "Final answer."},
+		}, "Final answer."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newFakeStore()
+			r, _ := testRunner(st, tc.steps...)
+			res, err := r.Turn(context.Background(), TurnRequest{
+				ConversationID: "c1", Character: testChar, Input: "hi",
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Text != tc.want {
+				t.Fatalf("result text = %q, want %q", res.Text, tc.want)
+			}
+		})
+	}
+}

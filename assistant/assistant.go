@@ -235,7 +235,9 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	set := r.settingsFor(ctx)
 	day := LogicalDay(now, set.Loc, set.DayStartsAt)
 	var records *Records
-	if rs, ok := r.store.(RecordsStore); ok && req.Character.Daily {
+	// The day's records are private too: no plans, activities or reminders in
+	// front of other characters.
+	if rs, ok := r.store.(RecordsStore); ok && req.Character.Daily && !room {
 		loaded := LoadRecords(ctx, rs, req.Character.ID, day, set)
 		records = &loaded
 	}
@@ -283,6 +285,9 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 		gateModelID := r.gateModel
 		if set.JobsModel != "" {
 			gateModelID = set.JobsModel
+		}
+		if gateModelID == "" {
+			gateModelID = modelName // the character's resolved model
 		}
 		gateModel, err := r.modelFor(string(llm.OpenCodeProvider))
 		if err != nil {
@@ -363,6 +368,7 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	}
 
 	var usage llm.Usage
+	var lastText string // the last words actually spoken (for errors and the cap)
 	usage.InputTokens += gateUsageTotal.InputTokens
 	usage.OutputTokens += gateUsageTotal.OutputTokens
 	webRead := false // a page or search result may carry planted instructions
@@ -388,13 +394,14 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 			r.finish(ctx, runID, status, err.Error(), usage)
 			result.Status = status
 			result.Usage = usage
+			result.Text = lastText
 			return result, err
 		}
 
 		usage.InputTokens += resp.Usage.InputTokens
 		usage.OutputTokens += resp.Usage.OutputTokens
 		if resp.Text != "" {
-			result.Text = resp.Text
+			lastText = resp.Text
 		}
 		// Fill missing ids before persisting, so the stored assistant call and
 		// the stored tool result carry the same id.
@@ -415,6 +422,9 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 		}
 
 		if len(resp.ToolCalls) == 0 {
+			// The terminal answer is the final reply; a preamble before a tool
+			// call is not.
+			result.Text = resp.Text
 			r.finish(ctx, runID, StatusOK, "", usage)
 			result.Status = StatusOK
 			result.Usage = usage
@@ -488,6 +498,7 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	r.finish(ctx, runID, StatusLimited, "", usage)
 	result.Status = StatusLimited
 	result.Usage = usage
+	result.Text = lastText
 	return result, nil
 }
 

@@ -10,6 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// UserSpeaker is the sentinel speaker (and transcript owner) for the user.
+const UserSpeaker = "me"
+
 // Fact is one durable thing about the user. Facts are never overwritten:
 // superseding closes valid_to on the old row and links it to the new one, so a
 // period question still finds it. Forget() keeps the row, marked forgotten.
@@ -33,6 +36,19 @@ type Fact struct {
 	UseCount     int
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+// Provenance says who a fact is about and who said it, when that is not the
+// user speaking about themselves. Empty when the fact is plain user knowledge.
+func (f Fact) Provenance() string {
+	var parts []string
+	if f.About != "" && f.About != UserSpeaker {
+		parts = append(parts, "about "+f.About)
+	}
+	if f.ToldBy != "" {
+		parts = append(parts, "heard from "+f.ToldBy)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // FactFilter narrows Facts. Zero values mean "no restriction".

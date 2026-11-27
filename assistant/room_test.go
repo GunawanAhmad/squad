@@ -147,6 +147,21 @@ func TestRoomTurnCapsAtFour(t *testing.T) {
 	if got := len(fake.Requests()); got != maxRoomTurns {
 		t.Fatalf("turn runs: %d, want %d", got, maxRoomTurns)
 	}
+	// The fourth reply mentions Ria, but the cap stops anyone from running her
+	// turn. Her copy must still receive the words said in the room.
+	ria, err := db.Messages(context.Background(), store.RoomConversationID(room.ID, "ria"), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, m := range ria {
+		if m.Role == "user" && m.Speaker == "socrates" && m.Content == "@Ria keep going" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the capped reply never reached ria's copy: %+v", ria)
+	}
 }
 
 func TestRoomTurnDefaultsToLastSpeaker(t *testing.T) {

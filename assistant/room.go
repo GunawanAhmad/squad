@@ -92,15 +92,15 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 	lock.Lock()
 	defer lock.Unlock()
 
-	meID := store.RoomConversationID(req.Room.ID, "me")
-	names := map[string]string{"me": "the user"}
+	meID := store.RoomConversationID(req.Room.ID, store.UserSpeaker)
+	names := map[string]string{store.UserSpeaker: "the user"}
 	for _, m := range req.Members {
 		names[m.ID] = m.Name
 	}
 
 	first := NextSpeaker(req.Input, req.Members, "")
 	if first == "" {
-		first = lastSpeaker(ctx, r, meID, req.Members)
+		first = r.lastSpeaker(ctx, meID, req.Members)
 	}
 	if first == "" {
 		first = req.Members[0].ID
@@ -112,15 +112,15 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 		if m.ID == first {
 			continue
 		}
-		if err := r.addRoomMessage(ctx, store.RoomConversationID(req.Room.ID, m.ID), "user", req.Input, "me"); err != nil {
+		if err := r.addRoomMessage(ctx, store.RoomConversationID(req.Room.ID, m.ID), "user", req.Input, store.UserSpeaker); err != nil {
 			return err
 		}
 	}
-	if err := r.addRoomMessage(ctx, meID, "user", req.Input, "me"); err != nil {
+	if err := r.addRoomMessage(ctx, meID, "user", req.Input, store.UserSpeaker); err != nil {
 		return err
 	}
 
-	speaker, from, text := first, "me", req.Input
+	speaker, heardFrom, text := first, store.UserSpeaker, req.Input
 	for turn := 0; turn < maxRoomTurns; turn++ {
 		member, ok := roomMember(req.Members, speaker)
 		if !ok {
@@ -138,41 +138,65 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 			ConversationID: store.RoomConversationID(req.Room.ID, speaker),
 			Character:      member.Character,
 			Input:          text,
-			Speaker:        from,
+			Speaker:        heardFrom,
 			Names:          names,
 			Listeners:      listeners,
 			Kind:           "room",
 		}, emit)
+		result := strings.TrimSpace(res.Text)
 		if err != nil {
+			// Everyone still hears the words that were said before the failure;
+			// nobody speaks next.
+			if result != "" {
+				if fanOutErr := r.fanOutRoom(ctx, meID, req.Room.ID, req.Members, speaker, "", result); fanOutErr != nil {
+					return fanOutErr
+				}
+			}
 			return err
 		}
-		result := strings.TrimSpace(res.Text)
 		if result == "" {
 			return nil
 		}
 
 		next := NextSpeaker(result, req.Members, speaker)
-		if err := r.addRoomMessage(ctx, meID, "assistant", result, speaker); err != nil {
+		// Only the next speaker's Turn stores the text as its input. At the cap
+		// nobody runs that Turn, so everyone must get the copy now.
+		more := next != "" && turn < maxRoomTurns-1
+		skip := ""
+		if more {
+			skip = next
+		}
+		if err := r.fanOutRoom(ctx, meID, req.Room.ID, req.Members, speaker, skip, result); err != nil {
 			return err
 		}
-		for _, m := range req.Members {
-			if m.ID == speaker || m.ID == next {
-				continue // its own copy has the assistant row; the next speaker gets it as Turn input
-			}
-			if err := r.addRoomMessage(ctx, store.RoomConversationID(req.Room.ID, m.ID), "user", result, speaker); err != nil {
-				return err
-			}
-		}
-		if next == "" {
+		if !more {
 			return nil
 		}
-		speaker, from, text = next, speaker, result
+		speaker, heardFrom, text = next, speaker, result
+	}
+	return nil
+}
+
+// fanOutRoom writes one reply into the user's transcript (as the character)
+// and into every member's copy except the speaker's (its Turn already stored
+// it) and skip (the member whose Turn will store it as its input).
+func (r *Runner) fanOutRoom(ctx context.Context, meID, roomID string, members []Member, speaker, skip, text string) error {
+	if err := r.addRoomMessage(ctx, meID, "assistant", text, speaker); err != nil {
+		return err
+	}
+	for _, m := range members {
+		if m.ID == speaker || m.ID == skip {
+			continue
+		}
+		if err := r.addRoomMessage(ctx, store.RoomConversationID(roomID, m.ID), "user", text, speaker); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 // lastSpeaker is the latest character that spoke in the user's copy, or "".
-func lastSpeaker(ctx context.Context, r *Runner, meID string, members []Member) string {
+func (r *Runner) lastSpeaker(ctx context.Context, meID string, members []Member) string {
 	msgs, err := r.store.RecentMessages(ctx, meID, 50)
 	if err != nil {
 		return ""

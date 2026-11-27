@@ -181,3 +181,57 @@ func TestOneToOneTurnUnchanged(t *testing.T) {
 		t.Fatalf("1:1 prompt got the room note:\n%s", system)
 	}
 }
+
+func TestRoomGateFallsBackToTurnModel(t *testing.T) {
+	db := storetest.New(t)
+	ctx := context.Background()
+	if _, err := db.AddFact(ctx, store.Fact{CharacterID: "socrates", Text: "likes tea", Category: "preference", Core: true}); err != nil {
+		t.Fatal(err)
+	}
+	fake := llm.NewFake(
+		llm.FakeStep{Text: `{"share":[]}`},
+		llm.FakeStep{Text: "ok"},
+	)
+	r := New(Config{
+		Store: db, Tools: tools.New(), DB: db,
+		Models:  map[string]llm.Model{string(llm.OpenCodeProvider): fake},
+		Profile: func() string { return "" },
+		Now:     func() time.Time { return testNow }, Location: testLoc,
+		// GateModel deliberately empty: it must fall back to the turn model.
+	})
+	char := Character{ID: "socrates", Name: "Socrates", Provider: "opencode", Model: "fake",
+		Persona: "You are Socrates.", Context: "memory", Tools: []string{"remember"}}
+	if _, err := r.Turn(ctx, TurnRequest{
+		ConversationID: "room:abc:socrates", Character: char, Input: "hello",
+		Speaker: "ria", Listeners: []string{"Ria"},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	reqs := fake.Requests()
+	if len(reqs) != 2 || reqs[0].Model != "fake" {
+		t.Fatalf("gate model: %+v", reqs)
+	}
+}
+
+func TestRoomTurnHasNoDailyRecords(t *testing.T) {
+	db := storetest.New(t)
+	ctx := context.Background()
+	day := LogicalDay(testNow, testLoc, 4*time.Hour)
+	if _, err := db.CreateTask(ctx, store.Task{Title: "secret plan", Status: "open", PlannedOn: &day}); err != nil {
+		t.Fatal(err)
+	}
+	fake := llm.NewFake(llm.FakeStep{Text: "ok"})
+	r := roomRunner(t, db, fake, func() string { return "" })
+	char := Character{ID: "assistant", Name: "Assistant", Provider: "opencode", Model: "fake",
+		Persona: "You are the assistant.", Context: "memory", Daily: true, Tools: []string{"remember"}}
+	if _, err := r.Turn(ctx, TurnRequest{
+		ConversationID: "room:abc:assistant", Character: char, Input: "hello",
+		Speaker: "ria", Listeners: []string{"Ria"},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	system := fake.Requests()[0].System
+	if strings.Contains(system, "<today>") || strings.Contains(system, "secret plan") {
+		t.Fatalf("the assistant's day leaked into a room:\n%s", system)
+	}
+}
