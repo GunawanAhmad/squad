@@ -1,4 +1,4 @@
-package main
+package character
 
 import (
 	"encoding/json"
@@ -13,7 +13,7 @@ import (
 
 func loadCharacters(t *testing.T) []Character {
 	t.Helper()
-	raw, err := os.ReadFile("characters.json")
+	raw, err := os.ReadFile("../characters.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,13 +26,13 @@ func loadCharacters(t *testing.T) []Character {
 
 func TestCharactersConfigIsValid(t *testing.T) {
 	list := loadCharacters(t)
-	if err := validateCharacters(list, tools.New()); err != nil {
+	if err := Validate(list, tools.New()); err != nil {
 		t.Fatalf("characters.json: %v", err)
 	}
 
 	var assistant *Character
 	for i := range list {
-		if list[i].ID == assistantCharacterID {
+		if list[i].ID == AssistantID {
 			assistant = &list[i]
 		}
 	}
@@ -40,7 +40,7 @@ func TestCharactersConfigIsValid(t *testing.T) {
 		t.Fatal("no assistant character")
 	}
 	for _, c := range list {
-		if c.ID != assistantCharacterID && len(c.Tools) == 0 {
+		if c.ID != AssistantID && len(c.Tools) == 0 {
 			t.Fatalf("%s has no tools", c.ID)
 		}
 	}
@@ -54,7 +54,7 @@ func TestCharactersConfigRejectsBadTools(t *testing.T) {
 			{ID: "ria", Name: "R", Model: "m", Context: "memory", Tools: []string{"web_search", "remember", "forget", "recall"}},
 		}
 	}
-	if err := validateCharacters(base(), tools.New()); err != nil {
+	if err := Validate(base(), tools.New()); err != nil {
 		t.Fatalf("baseline should pass: %v", err)
 	}
 
@@ -70,7 +70,7 @@ func TestCharactersConfigRejectsBadTools(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			list := base()
 			mutate(list)
-			err := validateCharacters(list, tools.New())
+			err := Validate(list, tools.New())
 			if err == nil {
 				t.Fatal("expected an error")
 			}
@@ -108,11 +108,11 @@ func TestAssistantPersonaFitsBudget(t *testing.T) {
 }
 
 func TestMemoryEnabledFollowsContext(t *testing.T) {
-	enabled := memoryEnabled(newRoster([]Character{
+	enabled := NewRoster([]Character{
 		{ID: "assistant", Context: "memory"},
 		{ID: "ria"}, // empty means the default, memory
 		{ID: "mute", Context: "none"},
-	}))
+	}, tools.New()).MemoryEnabled
 	for id, want := range map[string]bool{"assistant": true, "ria": true, "mute": false, "removed": false} {
 		if got := enabled(id); got != want {
 			t.Fatalf("memoryEnabled(%q) = %v, want %v", id, got, want)
@@ -136,7 +136,7 @@ func TestValidateDiscretion(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			list := []Character{{ID: "assistant", Name: "A", Model: "m", Tools: []string{"plan_tasks"}, Discretion: tc.d}}
-			err := validateCharacters(list, tools.New())
+			err := Validate(list, tools.New())
 			if tc.ok && err != nil {
 				t.Fatalf("want ok, got %v", err)
 			}
@@ -145,7 +145,7 @@ func TestValidateDiscretion(t *testing.T) {
 			}
 		})
 	}
-	if got := discretionOf(Character{}); got != 5 {
+	if got := DiscretionOf(Character{}); got != 5 {
 		t.Fatalf("default discretion = %d, want 5", got)
 	}
 }

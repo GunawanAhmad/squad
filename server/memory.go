@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"encoding/json"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"squad/assistant"
+	"squad/character"
 	"squad/store"
 	"squad/tools"
 )
@@ -26,27 +27,27 @@ import (
 // here: their store calls are scoped by the calling character.
 
 // memoryCharacter reads the explicit character the screen is acting for.
-func (s *server) memoryCharacter(w http.ResponseWriter, r *http.Request) (string, bool) {
+func (s *Server) memoryCharacter(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := strings.TrimSpace(r.URL.Query().Get("character"))
 	if id == "" {
 		http.Error(w, "character is required", http.StatusBadRequest)
 		return "", false
 	}
-	if _, ok := s.roster.get(id); !ok {
+	if _, ok := s.roster.Get(id); !ok {
 		http.Error(w, "unknown character", http.StatusBadRequest)
 		return "", false
 	}
 	return id, true
 }
 
-func (s *server) memoryPath() string {
+func (s *Server) memoryPath() string {
 	if s.memoryDir != "" {
 		return s.memoryDir
 	}
-	return memDir
+	return character.MemoryDir
 }
 
-func (s *server) handleListFacts(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListFacts(w http.ResponseWriter, r *http.Request) {
 	characterID, ok := s.memoryCharacter(w, r)
 	if !ok {
 		return
@@ -91,7 +92,7 @@ func (s *server) handleListFacts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"facts": out})
 }
 
-func (s *server) handlePatchFact(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePatchFact(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt(w, r)
 	if !ok {
 		return
@@ -141,7 +142,7 @@ func (s *server) handlePatchFact(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, factJSON(updated))
 }
 
-func (s *server) handleFactHistory(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFactHistory(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt(w, r)
 	if !ok {
 		return
@@ -164,7 +165,7 @@ func (s *server) handleFactHistory(w http.ResponseWriter, r *http.Request) {
 
 // handleForgetFact is the explicit Memory-screen delete: the UI asks first,
 // then sends confirm=true. It also hides the fact's source message.
-func (s *server) handleForgetFact(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleForgetFact(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt(w, r)
 	if !ok {
 		return
@@ -202,7 +203,7 @@ func (s *server) handleForgetFact(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 	characterID, ok := s.memoryCharacter(w, r)
 	if !ok {
 		return
@@ -268,7 +269,7 @@ func (s *server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs, "facts": factList})
 }
 
-func (s *server) handleForgetMessage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleForgetMessage(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt(w, r)
 	if !ok {
 		return
@@ -284,7 +285,7 @@ func (s *server) handleForgetMessage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *server) handleForgetDay(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleForgetDay(w http.ResponseWriter, r *http.Request) {
 	characterID, ok := s.memoryCharacter(w, r)
 	if !ok {
 		return
@@ -305,7 +306,7 @@ func (s *server) handleForgetDay(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"forgotten": n})
 }
 
-func (s *server) handleGetProfile(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleGetProfile(w http.ResponseWriter, _ *http.Request) {
 	raw, err := os.ReadFile(filepath.Join(s.memoryPath(), "profile.md"))
 	if errors.Is(err, os.ErrNotExist) {
 		writeJSON(w, http.StatusOK, map[string]any{"profile": ""})
@@ -318,7 +319,7 @@ func (s *server) handleGetProfile(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"profile": string(raw)})
 }
 
-func (s *server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Profile string `json:"profile"`
 	}

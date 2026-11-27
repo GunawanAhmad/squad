@@ -517,40 +517,6 @@ func (s *Store) searchFactsKeyword(ctx context.Context, q FactQuery) ([]Fact, er
 	return out, rows.Err()
 }
 
-// ImportFacts inserts a character's facts from the old memory/<char>.json files
-// once. A fact whose text is already active for that same character is skipped,
-// so restarts do not duplicate it. The caller decides core; the old
-// always-in-prompt notes import as core.
-func (s *Store) ImportFacts(ctx context.Context, characterID string, facts []Fact) (int, error) {
-	if err := requireOwner(characterID); err != nil {
-		return 0, err
-	}
-	imported := 0
-	for _, f := range facts {
-		text := strings.TrimSpace(f.Text)
-		if text == "" {
-			continue
-		}
-		if f.ValidFrom.IsZero() {
-			f.ValidFrom = time.Now()
-		}
-		if f.Category == "" || !ValidFactCategory(f.Category) {
-			f.Category = "general"
-		}
-		tag, err := s.pool.Exec(ctx, `
-			INSERT INTO facts (character_id, text, category, core, source_kind, valid_from)
-			SELECT $1, $2, $3, $4, 'user', $5
-			WHERE NOT EXISTS (
-				SELECT 1 FROM facts WHERE character_id = $1 AND lower(text) = lower($2)
-			)`, characterID, text, f.Category, f.Core, Day(f.ValidFrom))
-		if err != nil {
-			return imported, err
-		}
-		imported += int(tag.RowsAffected())
-	}
-	return imported, nil
-}
-
 // FactOp is one validated change from the day-close job. ApplyFactOps applies
 // them in one transaction; a rejected item never reaches this method.
 type FactOp struct {

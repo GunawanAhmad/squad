@@ -91,27 +91,6 @@ func TestFactsLifecycle(t *testing.T) {
 	}
 }
 
-func TestImportFactsIdempotent(t *testing.T) {
-	s := storetest.New(t)
-	ctx := context.Background()
-	facts := []store.Fact{
-		{Text: "prefers short answers", Category: "preference", Core: true},
-		{Text: "has a cat named Miso", Category: "person", Core: true},
-	}
-	n, err := s.ImportFacts(ctx, testOwner, facts)
-	if err != nil || n != 2 {
-		t.Fatalf("import: %d, %v", n, err)
-	}
-	n, err = s.ImportFacts(ctx, testOwner, facts)
-	if err != nil || n != 0 {
-		t.Fatalf("second import duplicated: %d, %v", n, err)
-	}
-	all, err := s.Facts(ctx, testOwner, store.FactFilter{Status: []string{"active"}})
-	if err != nil || len(all) != 2 || !all[0].Core || all[0].SourceKind != "user" {
-		t.Fatalf("imported facts: %+v, %v", all, err)
-	}
-}
-
 func TestSearchMessagesAndForget(t *testing.T) {
 	s := storetest.New(t)
 	ctx := context.Background()
@@ -184,29 +163,6 @@ func TestForgetDay(t *testing.T) {
 		if m.ForgottenAt == nil {
 			t.Fatalf("message not forgotten: %+v", m)
 		}
-	}
-}
-
-func TestImportDoesNotResurrectForgottenFact(t *testing.T) {
-	s := storetest.New(t)
-	ctx := context.Background()
-	facts := []store.Fact{{Text: "a note I will delete", Category: "general"}}
-	if n, err := s.ImportFacts(ctx, testOwner, facts); err != nil || n != 1 {
-		t.Fatalf("import: %d, %v", n, err)
-	}
-	active, _ := s.Facts(ctx, testOwner, store.FactFilter{Status: []string{"active"}})
-	if len(active) != 1 {
-		t.Fatalf("active: %+v", active)
-	}
-	if err := s.ForgetFact(ctx, testOwner, active[0].ID, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	// A restart imports the same file again; the forgotten note must stay gone.
-	if n, err := s.ImportFacts(ctx, testOwner, facts); err != nil || n != 0 {
-		t.Fatalf("re-import: %d, %v", n, err)
-	}
-	if active, _ := s.Facts(ctx, testOwner, store.FactFilter{Status: []string{"active"}}); len(active) != 0 {
-		t.Fatalf("forgotten imported fact came back: %+v", active)
 	}
 }
 

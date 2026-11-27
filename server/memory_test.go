@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"squad/character"
 	"squad/store"
 )
 
@@ -180,7 +181,9 @@ func TestMemoryProfileAPI(t *testing.T) {
 // explicitly selected character.
 func TestMemoryScreenIsPerCharacter(t *testing.T) {
 	s, db, mux := newRecordServer(t)
-	s.roster.list = append(s.roster.list, Character{ID: "ria", Name: "Ria"})
+	if err := s.roster.Add(context.Background(), character.Character{ID: "ria", Name: "Ria"}); err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 
 	assistantFact, err := db.AddFact(ctx, store.Fact{CharacterID: "assistant", Text: "likes black coffee", Category: "preference", ValidFrom: dayOf(2026, 12, 1)})

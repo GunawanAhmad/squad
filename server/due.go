@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 // database immediately; the check-in turn runs in the background so a slow
 // model never stalls the page. Two tabs polling at once cannot double-send:
 // the checkins primary key decides, and only one turn runs at a time.
-func (s *server) handleDue(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDue(w http.ResponseWriter, r *http.Request) {
 	if s.engine == nil {
 		http.Error(w, "assistant is not configured", http.StatusServiceUnavailable)
 		return

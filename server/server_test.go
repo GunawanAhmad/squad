@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"bytes"
@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"squad/assistant"
+	"squad/character"
 	"squad/llm"
 	"squad/store"
 	"squad/tools"
@@ -244,7 +245,7 @@ func (m *memStore) snapshot() (msgs []store.Message, runs []store.Run, calls []s
 	return append([]store.Message(nil), m.msgs...), append([]store.Run(nil), m.runs...), append([]store.ToolCall(nil), m.calls...)
 }
 
-func testServer(steps ...llm.FakeStep) (*server, *memStore, *llm.Fake) {
+func testServer(steps ...llm.FakeStep) (*Server, *memStore, *llm.Fake) {
 	reg := tools.New()
 	reg.Add(&tools.Tool{
 		Name: "echo", Description: "echo",
@@ -265,7 +266,7 @@ func testServer(steps ...llm.FakeStep) (*server, *memStore, *llm.Fake) {
 		Now:      func() time.Time { return time.Date(2026, 12, 1, 9, 0, 0, 0, time.UTC) },
 		Location: time.UTC,
 	})
-	chars := newRoster([]Character{
+	chars := character.NewRoster([]character.Character{
 		{
 			ID: "ria", Name: "Ria", Persona: "You are Ria.", Model: "fake-model",
 			Models: []string{"fake-model", "claude/opus"}, Tools: []string{"echo"},
@@ -273,13 +274,13 @@ func testServer(steps ...llm.FakeStep) (*server, *memStore, *llm.Fake) {
 		{
 			ID: "claude-char", Name: "Claude", Provider: "claude", Model: "opus", Persona: "You are Claude.",
 		},
-	})
-	return &server{roster: chars, db: st, runner: runner}, st, fake
+	}, tools.New())
+	return &Server{roster: chars, db: st, runner: runner}, st, fake
 }
 
-func (s *server) handler() http.Handler {
+func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
-	s.routes(mux)
+	s.Routes(mux)
 	return mux
 }
 

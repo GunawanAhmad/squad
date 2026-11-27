@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"encoding/json"
@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"squad/assistant"
+	"squad/character"
 	"squad/llm"
 	"squad/store"
 )
@@ -120,7 +121,7 @@ type draftRequest struct {
 
 // handleDraftCharacter asks the assistant's model for a character from a
 // description. Nothing is saved: the user reviews the draft first.
-func (s *server) handleDraftCharacter(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDraftCharacter(w http.ResponseWriter, r *http.Request) {
 	var req draftRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
@@ -171,16 +172,16 @@ func (s *server) handleDraftCharacter(w http.ResponseWriter, r *http.Request) {
 	d.Model = ""
 	d.Discretion = min(max(d.Discretion, 0), 10)
 	d.normalize()
-	if c, ok := s.roster.get(assistantCharacterID); ok {
-		d.Model = choice(c.Provider, c.Model)
+	if c, ok := s.roster.Get(character.AssistantID); ok {
+		d.Model = character.Choice(c.Provider, c.Model)
 	}
 	writeJSON(w, http.StatusOK, d)
 }
 
 // draftModel is the assistant's default model: it drafts characters the same
 // way it runs the share gate and the day close.
-func (s *server) draftModel() (llm.Model, string, error) {
-	c, ok := s.roster.get(assistantCharacterID)
+func (s *Server) draftModel() (llm.Model, string, error) {
+	c, ok := s.roster.Get(character.AssistantID)
 	if !ok || s.runner == nil {
 		return nil, "", errors.New("no assistant model to draft with")
 	}
@@ -196,7 +197,7 @@ func (s *server) draftModel() (llm.Model, string, error) {
 }
 
 // handleCreateCharacter saves a reviewed draft as a new character.
-func (s *server) handleCreateCharacter(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreateCharacter(w http.ResponseWriter, r *http.Request) {
 	var d charDraft
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&d); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
@@ -207,11 +208,11 @@ func (s *server) handleCreateCharacter(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := s.roster.add(r.Context(), c); err != nil {
+	if err := s.roster.Add(r.Context(), c); err != nil {
 		switch {
 		case errors.Is(err, store.ErrCharacterExists):
 			http.Error(w, "that character id was just taken; save again", http.StatusConflict)
-		case errors.Is(err, errInvalidCharacter):
+		case errors.Is(err, character.ErrInvalid):
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		default:
 			log.Printf("character create %q: %v", c.ID, err)
@@ -223,28 +224,28 @@ func (s *server) handleCreateCharacter(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildCharacter checks a draft and fills in the server-owned fields.
-func (s *server) buildCharacter(d charDraft) (Character, error) {
+func (s *Server) buildCharacter(d charDraft) (character.Character, error) {
 	d.normalize()
 	if d.Name == "" || len([]rune(d.Name)) > maxCharName {
-		return Character{}, fmt.Errorf("name must be 1-%d characters", maxCharName)
+		return character.Character{}, fmt.Errorf("name must be 1-%d characters", maxCharName)
 	}
 	if d.Persona == "" || len([]rune(d.Persona)) > maxCharPersona {
-		return Character{}, fmt.Errorf("persona must be 1-%d characters", maxCharPersona)
+		return character.Character{}, fmt.Errorf("persona must be 1-%d characters", maxCharPersona)
 	}
 	if d.Discretion < 0 || d.Discretion > 10 {
-		return Character{}, errors.New("discretion must be 0-10")
+		return character.Character{}, errors.New("discretion must be 0-10")
 	}
 	if err := checkPersonaTools(d.Tools); err != nil {
-		return Character{}, err
+		return character.Character{}, err
 	}
 	choices := s.modelChoices()
 	if d.Model == "" {
-		if a, ok := s.roster.get(assistantCharacterID); ok {
-			d.Model = choice(a.Provider, a.Model)
+		if a, ok := s.roster.Get(character.AssistantID); ok {
+			d.Model = character.Choice(a.Provider, a.Model)
 		}
 	}
 	if !slices.Contains(choices, d.Model) {
-		return Character{}, fmt.Errorf("unknown model %q", d.Model)
+		return character.Character{}, fmt.Errorf("unknown model %q", d.Model)
 	}
 	provider, model := "", d.Model
 	if m, ok := strings.CutPrefix(d.Model, "claude/"); ok {
@@ -257,10 +258,10 @@ func (s *server) buildCharacter(d charDraft) (Character, error) {
 		"voice": d.Voice, "doll": d.Doll,
 	})
 	if err != nil {
-		return Character{}, err
+		return character.Character{}, err
 	}
 	discretion := d.Discretion
-	return Character{
+	return character.Character{
 		ID: s.freeID(d.Name), Name: d.Name, UI: ui,
 		Persona:  d.Persona + memoryInstructions(d.Tools),
 		Provider: provider, Model: model, Models: choices,
@@ -273,7 +274,7 @@ func (s *server) buildCharacter(d charDraft) (Character, error) {
 func checkPersonaTools(list []string) error {
 	seen := map[string]bool{}
 	for _, t := range list {
-		if !slices.Contains(webTools, t) && !slices.Contains(memoryTools, t) {
+		if !slices.Contains(character.WebTools, t) && !slices.Contains(character.MemoryTools, t) {
 			return fmt.Errorf("tool %q is not available to new characters", t)
 		}
 		if seen[t] {
@@ -305,10 +306,10 @@ func memoryInstructions(list []string) string {
 
 // modelChoices is every model some character already offers, default first
 // per character: a new character may pick any of them.
-func (s *server) modelChoices() []string {
+func (s *Server) modelChoices() []string {
 	var out []string
-	for _, c := range s.roster.all() {
-		for _, m := range append([]string{choice(c.Provider, c.Model)}, c.Models...) {
+	for _, c := range s.roster.All() {
+		for _, m := range append([]string{character.Choice(c.Provider, c.Model)}, c.Models...) {
 			if m != "" && !slices.Contains(out, m) {
 				out = append(out, m)
 			}
@@ -318,7 +319,7 @@ func (s *server) modelChoices() []string {
 }
 
 // freeID turns a name into an unused id: "Dr. Pip" → "dr-pip", then "dr-pip-2".
-func (s *server) freeID(name string) string {
+func (s *Server) freeID(name string) string {
 	base := strings.Trim(slugRe.ReplaceAllString(strings.ToLower(name), "-"), "-")
 	if len(base) > 32 {
 		base = strings.Trim(base[:32], "-")
@@ -328,7 +329,7 @@ func (s *server) freeID(name string) string {
 	}
 	id := base
 	for n := 2; ; n++ {
-		if _, taken := s.roster.get(id); !taken && !slices.Contains(reservedIDs, id) {
+		if _, taken := s.roster.Get(id); !taken && !slices.Contains(reservedIDs, id) {
 			return id
 		}
 		id = base + "-" + strconv.Itoa(n)

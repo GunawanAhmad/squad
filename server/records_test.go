@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"bytes"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"squad/assistant"
+	"squad/character"
 	"squad/llm"
 	"squad/store"
 	"squad/store/storetest"
@@ -22,16 +23,16 @@ import (
 // 2026-12-01 and "tomorrow" is 2026-12-02.
 var testNow = time.Date(2026, 12, 1, 1, 0, 0, 0, time.UTC)
 
-func newRecordServer(t *testing.T) (*server, *store.Store, *http.ServeMux) {
+func newRecordServer(t *testing.T) (*Server, *store.Store, *http.ServeMux) {
 	t.Helper()
 	db := storetest.New(t)
-	s := &server{
-		roster: newRoster([]Character{{ID: "assistant", Name: "Assistant"}}),
+	s := &Server{
+		roster: character.NewRoster([]character.Character{{ID: "assistant", Name: "Assistant"}}, tools.New()),
 		db:     db, records: db, now: func() time.Time { return testNow },
 		memoryDir: t.TempDir(),
 	}
 	mux := http.NewServeMux()
-	s.routes(mux)
+	s.Routes(mux)
 	return s, db, mux
 }
 
@@ -287,12 +288,12 @@ func TestDueEndpoint(t *testing.T) {
 		Store: db, Runner: runner, Now: func() time.Time { return testNow },
 		Char: assistant.Character{ID: "assistant", Provider: "opencode", Model: "fake", Daily: true},
 	}
-	s := &server{
-		roster: newRoster([]Character{{ID: "assistant"}}),
+	s := &Server{
+		roster: character.NewRoster([]character.Character{{ID: "assistant"}}, tools.New()),
 		db:     db, records: db, engine: engine, now: func() time.Time { return testNow },
 	}
 	mux := http.NewServeMux()
-	s.routes(mux)
+	s.Routes(mux)
 
 	// 09:00 on 1 December: the morning check-in is due, and a reminder that
 	// came due is written into today's thread immediately.

@@ -1,4 +1,4 @@
-package main
+package backup
 
 import (
 	"context"
@@ -23,7 +23,7 @@ func backupDay(s string) time.Time {
 func TestDailyBackupOncePerDay(t *testing.T) {
 	dir := t.TempDir()
 	var calls atomic.Int32
-	b := &dailyBackup{dir: dir, keep: 14, dump: func(_ context.Context, w io.Writer) error {
+	b := &Daily{dir: dir, keep: 14, dump: func(_ context.Context, w io.Writer) error {
 		calls.Add(1)
 		_, err := io.WriteString(w, "dump")
 		return err
@@ -62,7 +62,7 @@ func TestDailyBackupOncePerDay(t *testing.T) {
 func TestDailyBackupFailureRetries(t *testing.T) {
 	dir := t.TempDir()
 	var calls atomic.Int32
-	b := &dailyBackup{dir: dir, keep: 14, dump: func(_ context.Context, _ io.Writer) error {
+	b := &Daily{dir: dir, keep: 14, dump: func(_ context.Context, _ io.Writer) error {
 		if calls.Add(1) == 1 {
 			return errors.New("pg_dump exploded")
 		}
@@ -85,7 +85,7 @@ func TestDailyBackupFailureRetries(t *testing.T) {
 
 func TestDailyBackupPrune(t *testing.T) {
 	dir := t.TempDir()
-	b := &dailyBackup{dir: dir, keep: 3, dump: func(_ context.Context, w io.Writer) error {
+	b := &Daily{dir: dir, keep: 3, dump: func(_ context.Context, w io.Writer) error {
 		_, err := io.WriteString(w, "x")
 		return err
 	}}

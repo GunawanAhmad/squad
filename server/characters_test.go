@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -9,24 +9,26 @@ import (
 	"testing"
 
 	"squad/assistant"
+	"squad/character"
 	"squad/llm"
+	"squad/tools"
 )
 
 // characterServer has an assistant (whose model drafts) and a scripted model.
-func characterServer(t *testing.T, steps ...llm.FakeStep) (*server, *[]Character) {
+func characterServer(t *testing.T, steps ...llm.FakeStep) (*Server, *[]character.Character) {
 	t.Helper()
 	fake := llm.NewFake(steps...)
 	runner := assistant.New(assistant.Config{
-		Store: newMemStore(), Tools: toolRegistry,
+		Store: newMemStore(), Tools: tools.New(),
 		Models: map[string]llm.Model{string(llm.OpenCodeProvider): fake},
 	})
-	r := newRoster([]Character{
+	r := character.NewRoster([]character.Character{
 		{ID: "assistant", Name: "Assistant", Model: "fast", Models: []string{"fast", "claude/opus"}, Tools: []string{"plan_tasks"}},
 		{ID: "pip", Name: "Pip", Model: "fast"},
-	})
-	var saved []Character
-	r.save = func(_ context.Context, c Character) error { saved = append(saved, c); return nil }
-	return &server{roster: r, runner: runner}, &saved
+	}, tools.New())
+	var saved []character.Character
+	r.Save = func(_ context.Context, c character.Character) error { saved = append(saved, c); return nil }
+	return &Server{roster: r, runner: runner}, &saved
 }
 
 func TestDraftCharacterClampsModelOutput(t *testing.T) {
@@ -78,7 +80,7 @@ func TestCreateCharacterFillsServerFields(t *testing.T) {
 		t.Fatalf("saved %d characters", len(*saved))
 	}
 	c := (*saved)[0]
-	if c.ID != "pip-2" || c.Provider != "claude" || c.Model != "opus" || c.Context != "memory" || discretionOf(c) != 3 {
+	if c.ID != "pip-2" || c.Provider != "claude" || c.Model != "opus" || c.Context != "memory" || character.DiscretionOf(c) != 3 {
 		t.Fatalf("server fields: %+v", c)
 	}
 	if !strings.HasPrefix(c.Persona, "You are another Pip.") || !strings.Contains(c.Persona, "use remember") || strings.Contains(c.Persona, "use forget") {
@@ -87,7 +89,7 @@ func TestCreateCharacterFillsServerFields(t *testing.T) {
 	if !strings.Contains(string(c.UI), `{"label":"Discretion","value":3}`) || !strings.Contains(string(c.UI), `"doll":{"head":"human"`) {
 		t.Fatalf("ui stats: %s", c.UI)
 	}
-	if _, ok := s.roster.get("pip-2"); !ok {
+	if _, ok := s.roster.Get("pip-2"); !ok {
 		t.Fatal("new character is not in the roster")
 	}
 	if w := doJSON(t, h, "GET", "/api/characters", ""); !strings.Contains(w.Body.String(), `"id":"pip-2"`) {
@@ -127,12 +129,12 @@ func TestCreateCharacterNeverTakesReservedIDs(t *testing.T) {
 
 func TestCreateCharacterSaveFailureKeepsRosterUnchanged(t *testing.T) {
 	s, _ := characterServer(t)
-	s.roster.save = func(context.Context, Character) error { return errors.New("db down") }
+	s.roster.Save = func(context.Context, character.Character) error { return errors.New("db down") }
 	w := doJSON(t, s.handler(), "POST", "/api/characters", `{"name":"Zed","persona":"p"}`)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status %d %s", w.Code, w.Body)
 	}
-	if _, ok := s.roster.get("zed"); ok {
+	if _, ok := s.roster.Get("zed"); ok {
 		t.Fatal("unsaved character joined the roster")
 	}
 }

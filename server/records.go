@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"encoding/json"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"squad/assistant"
+	"squad/character"
 	"squad/store"
 	"squad/tools"
 )
@@ -17,7 +18,7 @@ import (
 // share the tools' validation (tools.CreateTask, ApplyTaskPatch, ...): a date
 // the model may not write is a date the panel may not write either.
 
-func (s *server) handleListTasks(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	settings := s.settings(r.Context())
 	now := s.clock()
 	day := assistant.LogicalDay(now, settings.Loc, settings.DayStartsAt)
@@ -65,7 +66,7 @@ func (s *server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": out, "day": store.DayString(day)})
 }
 
-func (s *server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt(w, r)
 	if !ok {
 		return
@@ -87,7 +88,7 @@ func (s *server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, taskJSON(change.After))
 }
 
-func (s *server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt(w, r)
 	if !ok {
 		return
@@ -99,7 +100,7 @@ func (s *server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *server) handleListActivities(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 	settings := s.settings(r.Context())
 	now := s.clock()
 	day := assistant.LogicalDay(now, settings.Loc, settings.DayStartsAt)
@@ -128,7 +129,7 @@ func (s *server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"activities": out, "day": store.DayString(day)})
 }
 
-func (s *server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt(w, r)
 	if !ok {
 		return
@@ -182,7 +183,7 @@ func (s *server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, activityJSON(updated))
 }
 
-func (s *server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt(w, r)
 	if !ok {
 		return
@@ -194,7 +195,7 @@ func (s *server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *server) handleListReminders(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListReminders(w http.ResponseWriter, r *http.Request) {
 	f := store.ReminderFilter{Limit: queryInt(r, "limit", 0)}
 	q := r.URL.Query()
 	if v := q.Get("status"); v != "" {
@@ -220,7 +221,7 @@ func (s *server) handleListReminders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"reminders": out})
 }
 
-func (s *server) handlePatchReminder(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePatchReminder(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt(w, r)
 	if !ok {
 		return
@@ -282,7 +283,7 @@ func (s *server) handlePatchReminder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, reminderJSON(updated, settings.Loc))
 }
 
-func (s *server) handleDeleteReminder(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeleteReminder(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt(w, r)
 	if !ok {
 		return
@@ -294,11 +295,11 @@ func (s *server) handleDeleteReminder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, settingsJSON(s.settings(r.Context())))
 }
 
-func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TZ          *string `json:"tz,omitempty"`
 		DayStartsAt *string `json:"dayStartsAt,omitempty"`
@@ -348,7 +349,7 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 
 // handleUndo is the Today panel's undo: the same ApplyUndo the chat's undo tool
 // uses, restricted to the record whose button was pressed.
-func (s *server) handleUndo(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleUndo(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ToolCallID     int64  `json:"toolCallId"`
 		Kind           string `json:"kind"`
@@ -370,7 +371,7 @@ func (s *server) handleUndo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The Today panel is the assistant's; the record tools exist only for it.
-	summary, err := tools.ApplyUndo(r.Context(), s.records, assistantCharacterID, req.ToolCallID, req.Kind, req.ID)
+	summary, err := tools.ApplyUndo(r.Context(), s.records, character.AssistantID, req.ToolCallID, req.Kind, req.ID)
 	if err != nil {
 		recordError(w, err)
 		return

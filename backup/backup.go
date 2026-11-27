@@ -1,4 +1,4 @@
-package main
+package backup
 
 import (
 	"bytes"
@@ -19,17 +19,17 @@ import (
 )
 
 const (
-	backupDir   = "backups"
+	Dir         = "backups"
 	backupKeep  = 14
 	backupLimit = 60 * time.Second
 )
 
 var backupName = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\.dump$`)
 
-// dailyBackup writes one pg_dump per local day. It is lazy: the code path that
+// Daily writes one pg_dump per local day. It is lazy: the code path that
 // notices "the app is being used today" calls Maybe. In Phase 0 that is the
 // first turn; Phase 1's Due() will call the same method from its poll.
-type dailyBackup struct {
+type Daily struct {
 	dir  string
 	keep int
 	dump func(ctx context.Context, w io.Writer) error
@@ -37,14 +37,14 @@ type dailyBackup struct {
 	mu sync.Mutex
 }
 
-func newDailyBackup(dir string) *dailyBackup {
-	return &dailyBackup{dir: dir, keep: backupKeep, dump: composeDump}
+func New(dir string) *Daily {
+	return &Daily{dir: dir, keep: backupKeep, dump: composeDump}
 }
 
 // Maybe dumps today's database unless backups/<day>.dump already exists. A
 // failed dump leaves no file, so the next turn retries. Errors never fail the
 // turn: a missing backup is logged, not fatal.
-func (b *dailyBackup) Maybe(ctx context.Context, now time.Time) {
+func (b *Daily) Maybe(ctx context.Context, now time.Time) {
 	if b == nil {
 		return
 	}
@@ -92,7 +92,7 @@ func (b *dailyBackup) Maybe(ctx context.Context, now time.Time) {
 	b.prune()
 }
 
-func (b *dailyBackup) prune() {
+func (b *Daily) prune() {
 	entries, err := os.ReadDir(b.dir)
 	if err != nil {
 		log.Printf("backup: %v", err)

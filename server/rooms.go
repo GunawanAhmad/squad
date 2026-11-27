@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"encoding/json"
@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"squad/assistant"
+	"squad/character"
 	"squad/store"
 )
 
@@ -24,7 +25,7 @@ type createRoomRequest struct {
 	Members []string `json:"members"`
 }
 
-func (s *server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	var req createRoomRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
@@ -42,7 +43,7 @@ func (s *server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "me cannot be a member", http.StatusBadRequest)
 			return
 		}
-		if _, ok := s.roster.get(id); !ok {
+		if _, ok := s.roster.Get(id); !ok {
 			http.Error(w, "unknown character", http.StatusBadRequest)
 			return
 		}
@@ -65,7 +66,7 @@ func (s *server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, roomJSON(room))
 }
 
-func (s *server) handleListRooms(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListRooms(w http.ResponseWriter, r *http.Request) {
 	rooms, err := s.db.ListRooms(r.Context())
 	if err != nil {
 		serverError(w, "list rooms", err)
@@ -78,7 +79,7 @@ func (s *server) handleListRooms(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *server) handleRoomMessages(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRoomMessages(w http.ResponseWriter, r *http.Request) {
 	room, ok := s.room(w, r)
 	if !ok {
 		return
@@ -103,7 +104,7 @@ func (s *server) handleRoomMessages(w http.ResponseWriter, r *http.Request) {
 
 // handleNewRoomSession starts the room over with empty copies. Old sessions
 // stay stored, so the characters still remember them.
-func (s *server) handleNewRoomSession(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleNewRoomSession(w http.ResponseWriter, r *http.Request) {
 	room, ok := s.room(w, r)
 	if !ok {
 		return
@@ -116,7 +117,7 @@ func (s *server) handleNewRoomSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, roomJSON(room))
 }
 
-func (s *server) handlePostRoomMessage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePostRoomMessage(w http.ResponseWriter, r *http.Request) {
 	room, ok := s.room(w, r)
 	if !ok {
 		return
@@ -133,18 +134,18 @@ func (s *server) handlePostRoomMessage(w http.ResponseWriter, r *http.Request) {
 
 	members := make([]assistant.Member, 0, len(room.Members))
 	for _, id := range room.Members {
-		c, ok := s.roster.get(id)
+		c, ok := s.roster.Get(id)
 		if !ok {
 			http.Error(w, "unknown character", http.StatusBadRequest)
 			return
 		}
-		provider, model, err := resolveModel(c, "")
+		provider, model, err := character.ResolveModel(c, "")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		members = append(members, assistant.Member{
-			ID: c.ID, Name: c.Name, Character: toAssistantCharacter(c, provider, model),
+			ID: c.ID, Name: c.Name, Character: character.ToAssistant(c, provider, model),
 		})
 	}
 
@@ -163,7 +164,7 @@ func (s *server) handlePostRoomMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 // room resolves the {id} path value, writing the error response itself.
-func (s *server) room(w http.ResponseWriter, r *http.Request) (store.Room, bool) {
+func (s *Server) room(w http.ResponseWriter, r *http.Request) (store.Room, bool) {
 	id := r.PathValue("id")
 	if !conversationIDRe.MatchString(id) {
 		http.Error(w, "bad room id", http.StatusBadRequest)

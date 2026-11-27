@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -10,12 +10,12 @@ import (
 	"log"
 	"net/http"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"squad/assistant"
+	"squad/character"
 	"squad/store"
 )
 
@@ -32,13 +32,16 @@ type apiStore interface {
 	NewRoomSession(ctx context.Context, id string) (store.Room, error)
 }
 
+var sessionIDRe = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+
 var conversationIDRe = regexp.MustCompile(`^[A-Za-z0-9:_-]{1,80}$`)
 
 // maxMessageChars is the largest message the API accepts.
 const maxMessageChars = 50_000
 
-type server struct {
-	roster    *roster
+// Server is the JSON API the Vue app talks to.
+type Server struct {
+	roster    *character.Roster
 	db        apiStore
 	records   *store.Store // nullable in conversation-only tests
 	memoryDir string       // memory/ (tests use a temp dir)
@@ -47,8 +50,13 @@ type server struct {
 	now       func() time.Time  // injectable clock for tests
 }
 
+// New serves the API for chars, backed by db. engine may be nil (no assistant character).
+func New(chars *character.Roster, db *store.Store, runner *assistant.Runner, engine *assistant.Engine) *Server {
+	return &Server{roster: chars, db: db, records: db, runner: runner, engine: engine}
+}
+
 // settings is settings.tz and the day boundary; records is nil in tests.
-func (s *server) settings(ctx context.Context) assistant.Settings {
+func (s *Server) settings(ctx context.Context) assistant.Settings {
 	if s.records == nil {
 		return assistant.DefaultSettings()
 	}
@@ -56,23 +64,23 @@ func (s *server) settings(ctx context.Context) assistant.Settings {
 }
 
 // dailyConversation opens (or creates) the thread for the current logical day.
-func (s *server) dailyConversation(ctx context.Context) (store.Conversation, error) {
+func (s *Server) dailyConversation(ctx context.Context) (store.Conversation, error) {
 	set := s.settings(ctx)
 	day := assistant.LogicalDay(s.clock(), set.Loc, set.DayStartsAt)
 	return s.db.CreateConversation(ctx, store.Conversation{
-		ID: "daily:" + store.DayString(day), CharacterID: assistantCharacterID, Day: &day,
+		ID: "daily:" + store.DayString(day), CharacterID: character.AssistantID, Day: &day,
 	})
 }
 
 // clock is the server's wall clock (assistant.Now in production).
-func (s *server) clock() time.Time {
+func (s *Server) clock() time.Time {
 	if s.now != nil {
 		return s.now()
 	}
 	return assistant.Now()
 }
 
-func (s *server) routes(mux *http.ServeMux) {
+func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/characters", s.handleCharacters)
 	mux.HandleFunc("POST /api/characters", s.handleCreateCharacter)
 	mux.HandleFunc("POST /api/characters/draft", s.handleDraftCharacter)
@@ -113,8 +121,8 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/memory/profile", s.handlePutProfile)
 }
 
-func (s *server) handleCharacters(w http.ResponseWriter, _ *http.Request) {
-	list := s.roster.all()
+func (s *Server) handleCharacters(w http.ResponseWriter, _ *http.Request) {
+	list := s.roster.All()
 	public := make([]map[string]any, 0, len(list))
 	for _, c := range list {
 		public = append(public, publicCharacter(c))
@@ -123,26 +131,26 @@ func (s *server) handleCharacters(w http.ResponseWriter, _ *http.Request) {
 }
 
 // publicCharacter is what the browser sees of a character: no persona or tools.
-func publicCharacter(c Character) map[string]any {
-	return map[string]any{"id": c.ID, "name": c.Name, "ui": c.UI, "model": choice(c.Provider, c.Model), "models": c.Models, "discretion": discretionOf(c)}
+func publicCharacter(c character.Character) map[string]any {
+	return map[string]any{"id": c.ID, "name": c.Name, "ui": c.UI, "model": character.Choice(c.Provider, c.Model), "models": c.Models, "discretion": character.DiscretionOf(c)}
 }
 
 type createConversationRequest struct {
 	CharacterID string `json:"characterId"`
 }
 
-func (s *server) handleCreateConversation(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request) {
 	var req createConversationRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	if _, ok := s.roster.get(req.CharacterID); !ok {
+	if _, ok := s.roster.Get(req.CharacterID); !ok {
 		http.Error(w, "unknown character", http.StatusBadRequest)
 		return
 	}
 	// The assistant has one thread per day (D5); "new chat" means today's.
-	if req.CharacterID == assistantCharacterID {
+	if req.CharacterID == character.AssistantID {
 		conv, err := s.dailyConversation(r.Context())
 		if err != nil {
 			serverError(w, "open today's thread", err)
@@ -162,9 +170,9 @@ func (s *server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusCreated, conversationJSON(conv))
 }
 
-func (s *server) handleListConversations(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request) {
 	characterID := r.URL.Query().Get("characterId")
-	if _, ok := s.roster.get(characterID); !ok {
+	if _, ok := s.roster.Get(characterID); !ok {
 		http.Error(w, "unknown character", http.StatusBadRequest)
 		return
 	}
@@ -186,7 +194,7 @@ func (s *server) handleListConversations(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *server) handleMessages(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !conversationIDRe.MatchString(id) {
 		http.Error(w, "bad conversation id", http.StatusBadRequest)
@@ -225,7 +233,7 @@ type postMessageRequest struct {
 	Model   string `json:"model"`
 }
 
-func (s *server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !conversationIDRe.MatchString(id) {
 		http.Error(w, "bad conversation id", http.StatusBadRequest)
@@ -250,12 +258,12 @@ func (s *server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "get conversation", err)
 		return
 	}
-	c, ok := s.roster.get(conv.CharacterID)
+	c, ok := s.roster.Get(conv.CharacterID)
 	if !ok {
 		http.Error(w, "unknown character", http.StatusBadRequest)
 		return
 	}
-	provider, model, err := resolveModel(c, req.Model)
+	provider, model, err := character.ResolveModel(c, req.Model)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -264,7 +272,7 @@ func (s *server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	stream := newStream(w)
 	res, err := s.runner.Turn(r.Context(), assistant.TurnRequest{
 		ConversationID: conv.ID,
-		Character:      toAssistantCharacter(c, provider, model),
+		Character:      character.ToAssistant(c, provider, model),
 		Input:          req.Content,
 		Model:          model,
 	}, stream.event)
@@ -294,13 +302,13 @@ type importRequest struct {
 
 // handleImportConversation stores a browser localStorage chat once. The old
 // session id becomes the conversation id, so a retry is a no-op.
-func (s *server) handleImportConversation(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleImportConversation(w http.ResponseWriter, r *http.Request) {
 	var req importRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&req); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	if _, ok := s.roster.get(req.CharacterID); !ok {
+	if _, ok := s.roster.Get(req.CharacterID); !ok {
 		http.Error(w, "unknown character", http.StatusBadRequest)
 		return
 	}
@@ -348,23 +356,6 @@ func (s *server) handleImportConversation(w http.ResponseWriter, r *http.Request
 		}
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"id": req.SessionID, "imported": true, "messages": len(req.Messages)})
-}
-
-// resolveModel validates a picker choice against the character's allowlist and
-// returns the provider/model to use.
-func resolveModel(c Character, requested string) (provider, model string, err error) {
-	provider, model = c.Provider, c.Model
-	if requested == "" || requested == choice(c.Provider, c.Model) {
-		return provider, model, nil
-	}
-	if !slices.Contains(c.Models, requested) {
-		return "", "", errors.New("unknown model")
-	}
-	provider, model = "", requested
-	if m, ok := strings.CutPrefix(requested, "claude/"); ok {
-		provider, model = "claude", m
-	}
-	return provider, model, nil
 }
 
 type ndjsonStream struct {

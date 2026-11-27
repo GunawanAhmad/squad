@@ -221,7 +221,10 @@ Don't rename an `id` later: its chats and facts stay under the old one.
 
 | Path | What's there |
 |---|---|
-| `main.go`, `handlers*.go` | HTTP API, character loading and validation, memory wiring. |
+| `main.go` | Composition root: reads env and `characters.json`, wires the packages below, serves the UI. |
+| `server/` | HTTP API handlers (characters, conversations, rooms, assistant records, memory screen). |
+| `character/` | The `Character` config, validation, the live roster, and each character's memory prompt. |
+| `backup/` | Daily `pg_dump` backup with pruning. |
 | `assistant/` | Turn loop, prompt building, pre-retrieval, check-ins, nightly close, embedding worker. |
 | `llm/` | Model adapters: OpenCode, `claude` CLI, embeddings, and a fake model for tests. |
 | `tools/` | The tool registry and every tool. |
