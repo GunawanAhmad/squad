@@ -396,9 +396,7 @@ func validateCloseDoc(raw json.RawMessage, characterID string, existing []store.
 		// message ("" when the user said it).
 		toldBy := ""
 		if item.SourceMessageID != nil {
-			if sp := speakerOf[*item.SourceMessageID]; sp != "" && sp != store.UserSpeaker {
-				toldBy = sp
-			}
+			toldBy = store.ToldBy(speakerOf[*item.SourceMessageID])
 		}
 		ops = append(ops, store.FactOp{Op: op, ID: item.ID, Text: text, Category: category, Core: item.Core,
 			About: about, ToldBy: toldBy, SourceMessageID: item.SourceMessageID})

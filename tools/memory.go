@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,41 +23,38 @@ const maxFact = 300
 // AddFact validates and inserts one fact for one character. Shared by remember
 // and the Memory screen so both reject the same things. There is no unscoped
 // variant: a fact always belongs to exactly one agent.
-func AddFact(ctx context.Context, db *store.Store, characterID, text, category string, core bool, sourceKind string, sourceMessageID *int64, from time.Time, toolCallID *int64, about, toldBy string) (store.Fact, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
+func AddFact(ctx context.Context, db *store.Store, f store.Fact) (store.Fact, error) {
+	f.Text = strings.TrimSpace(f.Text)
+	if f.Text == "" {
 		return store.Fact{}, fmt.Errorf("%w: text is required", ErrInvalid)
 	}
-	if len(text) > maxFact {
+	if len(f.Text) > maxFact {
 		return store.Fact{}, fmt.Errorf("%w: facts are at most %d characters", ErrInvalid, maxFact)
 	}
-	category = strings.ToLower(strings.TrimSpace(category))
-	if category == "" {
-		category = "general"
+	f.Category = strings.ToLower(strings.TrimSpace(f.Category))
+	if f.Category == "" {
+		f.Category = "general"
 	}
-	if !store.ValidFactCategory(category) {
+	if !store.ValidFactCategory(f.Category) {
 		return store.Fact{}, fmt.Errorf("%w: category must be one of %s", ErrInvalid, strings.Join(store.FactCategories, ", "))
 	}
-	if sourceKind == "" {
-		sourceKind = "tool"
+	if f.SourceKind == "" {
+		f.SourceKind = "tool"
+	}
+	if f.About == "" {
+		f.About = store.UserSpeaker
 	}
 	// Do not store the same active fact twice; say it is already known.
-	existing, err := db.Facts(ctx, characterID, store.FactFilter{Status: []string{"active"}})
+	existing, err := db.Facts(ctx, f.CharacterID, store.FactFilter{Status: []string{"active"}})
 	if err != nil {
 		return store.Fact{}, err
 	}
-	for _, f := range existing {
-		if strings.EqualFold(f.Text, text) {
-			return store.Fact{}, fmt.Errorf("%w: already known as fact #%d", ErrConflict, f.ID)
+	for _, old := range existing {
+		if strings.EqualFold(old.Text, f.Text) {
+			return store.Fact{}, fmt.Errorf("%w: already known as fact #%d", ErrConflict, old.ID)
 		}
 	}
-	if about == "" {
-		about = store.UserSpeaker
-	}
-	return db.AddFact(ctx, store.Fact{
-		CharacterID: characterID, Text: text, Category: category, Core: core, SourceKind: sourceKind,
-		SourceMessageID: sourceMessageID, ValidFrom: from, About: about, ToldBy: toldBy,
-	})
+	return db.AddFact(ctx, f)
 }
 
 // ResolveFact finds a fact by "#12", "12" or (part of) its text among
@@ -115,7 +113,7 @@ func FactLine(f store.Fact) string {
 func rememberTool() *Tool {
 	return &Tool{
 		Name: "remember",
-		Description: "Store a durable fact about the user (preference, person, circumstance, goal, work, health). " +
+		Description: "Store a durable fact about the user, or in a room about another member (preference, person, circumstance, goal, work, health). " +
 			"Use supersedes when a fact changes (\"I moved to Jakarta\" supersedes \"lives in Bali\"): the old fact keeps its history. " +
 			"Never store guesses or things the user did not say.",
 		Parameters: map[string]any{
@@ -124,6 +122,7 @@ func rememberTool() *Tool {
 				"text":       map[string]any{"type": "string", "description": "one sentence about the user, <= 300 chars"},
 				"category":   map[string]any{"type": "string", "enum": store.FactCategories},
 				"core":       map[string]any{"type": "boolean", "description": "always keep in context (preferences, people, circumstances)"},
+				"about":      map[string]any{"type": "string", "description": "who the fact is about: \"me\" (default) or a member's id"},
 				"supersedes": map[string]any{"type": "string", "description": "id or text of the fact this one replaces"},
 			},
 			"required": []string{"text"},
@@ -136,6 +135,7 @@ func rememberTool() *Tool {
 				Text       string `json:"text"`
 				Category   string `json:"category"`
 				Core       bool   `json:"core"`
+				About      string `json:"about"`
 				Supersedes string `json:"supersedes"`
 			}
 			if err := json.Unmarshal([]byte(raw), &args); err != nil {
@@ -150,13 +150,23 @@ func rememberTool() *Tool {
 			if strings.TrimSpace(args.Supersedes) != "" {
 				old, candidates, resolveErr = ResolveFact(ctx, env.DB, env.CharacterID, args.Supersedes)
 			}
-			// told_by comes from who spoke, never from the model: a fact heard
-			// from another character in a room says so.
-			toldBy := ""
-			if env.Speaker != "" && env.Speaker != store.UserSpeaker {
-				toldBy = env.Speaker
+			about := strings.TrimSpace(args.About)
+			if about == "" {
+				about = store.UserSpeaker
 			}
-			fact, err := AddFact(ctx, env.DB, env.CharacterID, args.Text, args.Category, args.Core, "tool", env.SourceMessageID, recordToday(env), nil, store.UserSpeaker, toldBy)
+			allowed := env.FactSubjects
+			if len(allowed) == 0 {
+				allowed = []string{store.UserSpeaker, env.CharacterID}
+			}
+			if !slices.Contains(allowed, about) {
+				return Result{}, fmt.Errorf("about must be me or one of: %s", strings.Join(allowed, ", "))
+			}
+			fact, err := AddFact(ctx, env.DB, store.Fact{
+				CharacterID: env.CharacterID, Text: args.Text, Category: args.Category, Core: args.Core,
+				SourceKind: "tool", SourceMessageID: env.SourceMessageID, ValidFrom: recordToday(env),
+				// told_by comes from who spoke, never from the model.
+				About: about, ToldBy: store.ToldBy(env.Speaker),
+			})
 			if err != nil {
 				if errors.Is(err, ErrConflict) {
 					return text(err.Error() + "; no new fact stored"), nil

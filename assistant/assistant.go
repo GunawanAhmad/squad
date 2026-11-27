@@ -144,6 +144,9 @@ type TurnRequest struct {
 	// non-empty list makes this a room turn: the profile replaces private
 	// memory, memory candidates go through the share gate, and recall is off.
 	Listeners []string
+	// Participants are the character ids present (including the speaker), so a
+	// remembered fact can be about any of them. Empty in 1:1 chats.
+	Participants []string
 }
 
 // Event mirrors the NDJSON the frontend already knows.
@@ -319,7 +322,8 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	env := tools.Env{
 		CharacterID: req.Character.ID, ConversationID: conv.ID,
 		Allowed: toolNames, Now: now, Speaker: req.Speaker,
-		DB: r.db, Loc: set.Loc, Day: day, DayStartsAt: set.DayStartsAt,
+		FactSubjects: factSubjects(req.Character.ID, req.Participants),
+		DB:           r.db, Loc: set.Loc, Day: day, DayStartsAt: set.DayStartsAt,
 		SourceMessageID: &userMsg.ID, Embedder: r.embedder,
 	}
 
@@ -569,4 +573,16 @@ func traceArgs(raw string) []byte {
 	}
 	b, _ := json.Marshal(map[string]string{"invalid_arguments": raw})
 	return b
+}
+
+// factSubjects are the ids a remembered fact may be about: the user, the
+// speaking character, and the other characters present.
+func factSubjects(characterID string, participants []string) []string {
+	out := []string{store.UserSpeaker, characterID}
+	for _, id := range participants {
+		if id != "" && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
 }

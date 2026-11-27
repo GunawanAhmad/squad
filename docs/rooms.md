@@ -63,7 +63,9 @@ records, and it removes the tools that read them (`get_overview`,
 `get_summary`, `query_activities`, `list_tasks`, `list_reminders`) along with
 `recall`. Room turns also carry a short `<room>` note that tells the character
 how @mention hands the turn on. On a room day the close job refuses a fact with
-no `source_message_id`, so `told_by` is never guessed.
+no `source_message_id`, so `told_by` is never guessed. The `remember` tool takes
+an optional `about`, limited to the user and the people present, so a member can
+record a fact about another member.
 
 ## Verified
 

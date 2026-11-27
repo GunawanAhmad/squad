@@ -61,7 +61,10 @@ func TestRememberSupersedes(t *testing.T) {
 	ctx := context.Background()
 
 	old := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
-	bali, err := tools.AddFact(ctx, db, "assistant", "lives in Bali", "circumstance", true, "user", nil, old, nil, "me", "")
+	bali, err := tools.AddFact(ctx, db, store.Fact{
+		CharacterID: "assistant", Text: "lives in Bali", Category: "circumstance", Core: true,
+		SourceKind: "user", ValidFrom: old,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,5 +244,26 @@ func TestRememberRecordsToldBy(t *testing.T) {
 		if f := byText[text]; f.ToldBy != "" || f.About != "me" {
 			t.Fatalf("%s: %+v", text, f)
 		}
+	}
+}
+
+func TestRememberAboutMustBeAParticipant(t *testing.T) {
+	db := storetest.New(t)
+	env, _ := envFor(t, db, "remember")
+	env.FactSubjects = []string{"me", "assistant", "ria"}
+	ctx := context.Background()
+
+	runTool(t, env, "remember", `{"text":"hates mornings","about":"ria"}`)
+	facts, err := db.Facts(ctx, "assistant", store.FactFilter{Status: []string{"active"}})
+	if err != nil || len(facts) != 1 {
+		t.Fatalf("facts: %+v, %v", facts, err)
+	}
+	if facts[0].About != "ria" || facts[0].ToldBy != "" {
+		t.Fatalf("about ria: %+v", facts[0])
+	}
+
+	if _, err := tools.New().Run(ctx, env, "remember", `{"text":"likes tea","about":"bob"}`); err == nil ||
+		!strings.Contains(err.Error(), "about must be") {
+		t.Fatalf("unknown about: %v", err)
 	}
 }

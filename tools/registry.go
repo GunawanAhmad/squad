@@ -32,6 +32,10 @@ type Env struct {
 	// Speaker is who said the turn's input in a room (a character id, or
 	// "me"); the remember tool stamps told_by from it. Empty in 1:1 chats.
 	Speaker string
+	// FactSubjects are the ids a remembered fact may be about: "me", the
+	// speaking character, and the other members present. Empty means just
+	// "me" and the character.
+	FactSubjects []string
 }
 
 // Result is what a tool returns: text for the model and, for write tools, the

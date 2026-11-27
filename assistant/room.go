@@ -131,6 +131,11 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 		return err
 	}
 
+	participants := make([]string, 0, len(req.Members))
+	for _, m := range req.Members {
+		participants = append(participants, m.ID)
+	}
+
 	speaker, heardFrom, text := first, store.UserSpeaker, req.Input
 	for turn := 0; turn < maxRoomTurns; turn++ {
 		member, ok := roomMember(req.Members, speaker)
@@ -152,6 +157,7 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 			Speaker:        heardFrom,
 			Names:          names,
 			Listeners:      listeners,
+			Participants:   participants,
 			Kind:           "room",
 		}, emit)
 		result := strings.TrimSpace(res.Text)

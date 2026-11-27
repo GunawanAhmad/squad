@@ -222,3 +222,28 @@ func TestRoomTurnLastSpeakerBeyondTheWindow(t *testing.T) {
 		t.Fatalf("answered by %v, want socrates (the last speaker, 61 messages back)", spoke)
 	}
 }
+
+func TestRoomRememberCanBeAboutAnotherMember(t *testing.T) {
+	db := storetest.New(t)
+	fake := llm.NewFake(
+		llm.FakeStep{ToolCalls: []llm.ToolCall{{ID: "r1", Name: "remember",
+			Arguments: `{"text":"ria hates mornings","category":"preference","about":"ria"}`}}},
+		llm.FakeStep{Text: "Noted."},
+	)
+	runner, room, members := roomFixture(t, db, fake, "socrates", "ria")
+	for i := range members {
+		members[i].Character.Tools = []string{"remember"}
+	}
+	if err := runner.RoomTurn(context.Background(), RoomRequest{
+		Room: room, Members: members, Input: "@Socrates note that Ria hates mornings",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := db.Facts(context.Background(), "socrates", store.FactFilter{Status: []string{"active"}})
+	if err != nil || len(facts) != 1 {
+		t.Fatalf("facts: %+v, %v", facts, err)
+	}
+	if facts[0].About != "ria" || facts[0].ToldBy != "" {
+		t.Fatalf("a room fact about ria: %+v", facts[0])
+	}
+}

@@ -125,7 +125,8 @@ unchanged; your copy (`me`) is the transcript the UI shows.
   everyone. Rooms do not load the Assistant's day records, and they take away
   the tools that would read them (`recall`, `get_overview`, `get_summary`,
   `query_activities`, `list_tasks`, `list_reminders`): both would bypass the
-  gate. `remember` and `forget` still work.
+  gate. `remember` and `forget` still work; `remember` can file a fact about
+  you or about another member (`about`), limited to the people present.
 - **API.** `POST /api/rooms` with `{name, members}`, `GET /api/rooms`,
   `GET /api/rooms/{id}/messages` (the transcript, each row with a `speaker`),
   and `POST /api/rooms/{id}/messages` with `{content}`, which streams NDJSON

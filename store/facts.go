@@ -38,6 +38,14 @@ type Fact struct {
 	UpdatedAt    time.Time
 }
 
+// ToldBy is the character that said something, or "" when the user said it.
+func ToldBy(speaker string) string {
+	if speaker == "" || speaker == UserSpeaker {
+		return ""
+	}
+	return speaker
+}
+
 // Provenance says who a fact is about and who said it, when that is not the
 // user speaking about themselves. Empty when the fact is plain user knowledge.
 func (f Fact) Provenance() string {
