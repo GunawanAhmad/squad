@@ -2,6 +2,7 @@
 export type PortraitState = 'idle' | 'thinking' | 'talking';
 export interface Character {
   id: string; name: string; model: string; models: string[] | null;
+  discretion: number; // 0-10, how much the character shares about you in a room
   ui: {
     tagline: string; description: string; accentColor: string; selectLine: string;
     portrait: Record<PortraitState, string>;

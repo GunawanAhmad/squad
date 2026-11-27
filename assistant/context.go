@@ -39,6 +39,9 @@ type Character struct {
 	// Daily marks the assistant: it gets the day's records in context and
 	// lives in one thread per day. Personas never see the user's day.
 	Daily bool
+	// Discretion (0-10) is how much the character shares about the user in a
+	// room; the share gate uses it.
+	Discretion int
 }
 
 // hasMemory reports whether the character's context setting turns on the memory

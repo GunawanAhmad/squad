@@ -119,3 +119,33 @@ func TestMemoryEnabledFollowsContext(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateDiscretion(t *testing.T) {
+	n := func(v int) *int { return &v }
+	cases := []struct {
+		name string
+		d    *int
+		ok   bool
+	}{
+		{"unset defaults to 5", nil, true},
+		{"zero", n(0), true},
+		{"ten", n(10), true},
+		{"eleven", n(11), false},
+		{"negative", n(-1), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			list := []Character{{ID: "assistant", Name: "A", Model: "m", Tools: []string{"plan_tasks"}, Discretion: tc.d}}
+			err := validateCharacters(list, tools.New())
+			if tc.ok && err != nil {
+				t.Fatalf("want ok, got %v", err)
+			}
+			if !tc.ok && (err == nil || !strings.Contains(err.Error(), "discretion")) {
+				t.Fatalf("want a discretion error, got %v", err)
+			}
+		})
+	}
+	if got := discretionOf(Character{}); got != 5 {
+		t.Fatalf("default discretion = %d, want 5", got)
+	}
+}

@@ -39,6 +39,20 @@ type Character struct {
 	// profile.md plus its own core facts and pre-retrieval; "none" means none.
 	// Memory is never shared between characters.
 	Context string `json:"context"`
+	// Discretion is how much the character shares about the user in a room,
+	// 0-10. Nil means the default (5).
+	Discretion *int `json:"discretion"`
+}
+
+// defaultDiscretion applies when characters.json does not set one.
+const defaultDiscretion = 5
+
+// discretionOf returns the character's discretion, or the default.
+func discretionOf(c Character) int {
+	if c.Discretion == nil {
+		return defaultDiscretion
+	}
+	return *c.Discretion
 }
 
 // The assistant is the one character with daily threads and domain tools.
@@ -135,7 +149,7 @@ func main() {
 			Store: db, Runner: runner, Now: assistant.Now, MemoryEnabled: memoryEnabled(chars),
 			Char: assistant.Character{
 				ID: c.ID, Name: c.Name, Provider: provider, Model: model,
-				Persona: c.Persona, Tools: c.Tools, Context: c.Context, Daily: true,
+				Persona: c.Persona, Tools: c.Tools, Context: c.Context, Daily: true, Discretion: discretionOf(c),
 			},
 			Setting: func(ctx context.Context) assistant.Settings { return assistant.LoadSettings(ctx, db) },
 			Before:  func(ctx context.Context, now time.Time) { backup.Maybe(ctx, now) },
@@ -232,6 +246,9 @@ func validateCharacters(list []Character, reg *tools.Registry) error {
 		case "", "memory", "none":
 		default:
 			return fmt.Errorf("character %q: context must be memory or none, not %q", c.ID, c.Context)
+		}
+		if c.Discretion != nil && (*c.Discretion < 0 || *c.Discretion > 10) {
+			return fmt.Errorf("character %q: discretion must be 0-10, not %d", c.ID, *c.Discretion)
 		}
 		if len(c.Models) > 0 && !slices.Contains(c.Models, choice(c.Provider, c.Model)) {
 			return fmt.Errorf("character %q: models must include %q", c.ID, choice(c.Provider, c.Model))

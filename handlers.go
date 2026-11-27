@@ -102,7 +102,7 @@ func (s *server) routes(mux *http.ServeMux) {
 func (s *server) handleCharacters(w http.ResponseWriter, _ *http.Request) {
 	public := make([]map[string]any, 0, len(s.list))
 	for _, c := range s.list {
-		public = append(public, map[string]any{"id": c.ID, "name": c.Name, "ui": c.UI, "model": choice(c.Provider, c.Model), "models": c.Models})
+		public = append(public, map[string]any{"id": c.ID, "name": c.Name, "ui": c.UI, "model": choice(c.Provider, c.Model), "models": c.Models, "discretion": discretionOf(c)})
 	}
 	writeJSON(w, http.StatusOK, public)
 }
@@ -246,7 +246,7 @@ func (s *server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		ConversationID: conv.ID,
 		Character: assistant.Character{
 			ID: c.ID, Name: c.Name, Provider: provider, Model: model, Persona: c.Persona, Tools: c.Tools,
-			Context: c.Context, Daily: c.ID == assistantCharacterID,
+			Context: c.Context, Daily: c.ID == assistantCharacterID, Discretion: discretionOf(c),
 		},
 		Input: req.Content,
 		Model: model,
