@@ -107,6 +107,12 @@ func readProfile() string {
 	return string(raw)
 }
 
+// profilePrompt is the room-mode memory block: profile.md only. The user wrote
+// it for everyone, so it is not gated by the share gate.
+func profilePrompt() string {
+	return memoryPrompt(readProfile(), nil)
+}
+
 // memoryPrompt renders the always-in-prompt block: the profile file plus core
 // facts from the database, capped so a long list cannot crowd out the day.
 func memoryPrompt(profile string, facts []store.Fact) string {

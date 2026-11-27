@@ -28,6 +28,7 @@ const (
 type Searcher interface {
 	SearchMessages(ctx context.Context, q store.MessageQuery) ([]store.MessageHit, error)
 	SearchFacts(ctx context.Context, q store.FactQuery) ([]store.Fact, error)
+	CoreFacts(ctx context.Context, characterID string, limit int) ([]store.Fact, error)
 	TouchFacts(ctx context.Context, ids []int64) error
 }
 

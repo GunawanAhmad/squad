@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -42,14 +43,22 @@ type Store interface {
 }
 
 type Config struct {
-	Store    Store
-	Tools    *tools.Registry
-	Models   map[string]llm.Model
-	Memory   func(characterID string) string // persona-adjacent notes; may be nil
-	Now      func() time.Time
-	Location *time.Location
-	Window   int // last N messages, default DefaultWindow
-	MaxSteps int // model calls per turn, default 10
+	Store  Store
+	Tools  *tools.Registry
+	Models map[string]llm.Model
+	// Memory is the always-in-prompt block for one character: profile.md plus
+	// its own core facts. Nil means no memory block.
+	Memory func(characterID string) string
+	// Profile is the room-mode memory: profile.md only, nothing private. It
+	// is not gated (the user wrote it for everyone).
+	Profile func() string
+	// GateModel is the model id the room share gate runs with; empty means the
+	// character's own model. settings.jobs_model overrides it.
+	GateModel string
+	Now       func() time.Time
+	Location  *time.Location
+	Window    int // last N messages, default DefaultWindow
+	MaxSteps  int // model calls per turn, default 10
 	// BeforeTurn runs before the turn proceeds (e.g. the lazy daily backup).
 	// It must not fail the turn; errors are the hook's own business.
 	BeforeTurn func(ctx context.Context)
@@ -62,14 +71,16 @@ type Config struct {
 }
 
 type Runner struct {
-	store    Store
-	tools    *tools.Registry
-	models   map[string]llm.Model
-	memory   func(string) string
-	now      func() time.Time
-	loc      *time.Location
-	window   int
-	maxSteps int
+	store     Store
+	tools     *tools.Registry
+	models    map[string]llm.Model
+	memory    func(string) string
+	profile   func() string
+	gateModel string
+	now       func() time.Time
+	loc       *time.Location
+	window    int
+	maxSteps  int
 
 	beforeTurn func(context.Context)
 	db         *store.Store
@@ -86,6 +97,8 @@ func New(cfg Config) *Runner {
 		tools:      cfg.Tools,
 		models:     cfg.Models,
 		memory:     cfg.Memory,
+		profile:    cfg.Profile,
+		gateModel:  cfg.GateModel,
 		now:        cfg.Now,
 		loc:        cfg.Location,
 		window:     cfg.Window,
@@ -126,6 +139,10 @@ type TurnRequest struct {
 	Speaker string
 	// Names maps speaker ids to display names for room history.
 	Names map[string]string
+	// Listeners are the display names of the other characters present. A
+	// non-empty list makes this a room turn: the profile replaces private
+	// memory, memory candidates go through the share gate, and recall is off.
+	Listeners []string
 }
 
 // Event mirrors the NDJSON the frontend already knows.
@@ -200,9 +217,19 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	if err != nil {
 		return Result{}, err
 	}
+	room := len(req.Listeners) > 0
 	var memory string
-	if r.memory != nil {
+	if room {
+		if r.profile != nil {
+			memory = r.profile()
+		}
+	} else if r.memory != nil {
 		memory = r.memory(req.Character.ID)
+	}
+	// In a room the character loses recall: it would bypass the share gate.
+	toolNames := req.Character.Tools
+	if room {
+		toolNames = slices.DeleteFunc(slices.Clone(req.Character.Tools), func(n string) bool { return n == "recall" })
 	}
 	now := r.now()
 	set := r.settingsFor(ctx)
@@ -228,6 +255,55 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 			retrieved = hits
 		}
 	}
+
+	var gate *gateTrace
+	var gateUsageTotal llm.Usage
+	if room {
+		var candidates []Retrieved
+		if searcher, ok := r.store.(Searcher); ok && req.Character.hasMemory() {
+			facts, err := searcher.CoreFacts(ctx, req.Character.ID, 20)
+			if err != nil {
+				log.Printf("assistant: room core facts: %v", err)
+			}
+			seen := map[string]bool{}
+			add := func(r Retrieved) {
+				key := candidateKey(r)
+				if !seen[key] {
+					seen[key] = true
+					candidates = append(candidates, r)
+				}
+			}
+			for _, f := range facts {
+				add(Retrieved{Kind: "fact", ID: f.ID, When: store.DayString(f.ValidFrom), Who: f.Category, Text: f.Text})
+			}
+			for _, h := range retrieved {
+				add(h)
+			}
+		}
+		gateModelID := r.gateModel
+		if set.JobsModel != "" {
+			gateModelID = set.JobsModel
+		}
+		gateModel, err := r.modelFor(string(llm.OpenCodeProvider))
+		if err != nil {
+			log.Printf("assistant: share gate: %v", err)
+			gate = &gateTrace{Err: err.Error(), KeptIDs: candidateKeys(candidates)}
+			retrieved = nil
+		} else {
+			res, gateUsage := Gate(ctx, GateInput{
+				Model: gateModel, ModelID: gateModelID, Character: req.Character,
+				Listeners: req.Listeners, Question: req.Input, Candidates: candidates,
+			})
+			gateUsageTotal.InputTokens += gateUsage.InputTokens
+			gateUsageTotal.OutputTokens += gateUsage.OutputTokens
+			gate = &gateTrace{SharedIDs: candidateKeys(res.Shared), KeptIDs: candidateKeys(res.Kept), Err: res.Err}
+			if res.Err != "" {
+				log.Printf("assistant: share gate failed closed: %s", res.Err)
+			}
+			retrieved = res.Shared
+			touchFacts(ctx, r.store, res.Shared)
+		}
+	}
 	cctx := BuildContext(ContextInput{
 		Character: req.Character, Memory: memory, History: history, Summary: conv.Summary,
 		Window: r.window, Now: now, Settings: set, Records: records, Retrieved: retrieved,
@@ -235,7 +311,7 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	})
 
 	retrievedMessages, retrievedFacts := Retrieved{}.splitIDs(retrieved)
-	trace, _ := json.Marshal(contextTrace{
+	traceDoc := contextTrace{
 		Sections:            cctx.Sections,
 		MessageIDs:          cctx.MessageIDs,
 		Window:              cctx.Window,
@@ -244,7 +320,13 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 		RetrievedFactIDs:    retrievedFacts,
 		SummaryUpto:         summaryUpto(conv),
 		Truncated:           cctx.Truncated,
-	})
+	}
+	if gate != nil {
+		traceDoc.GateSharedIDs = gate.SharedIDs
+		traceDoc.GateKeptIDs = gate.KeptIDs
+		traceDoc.GateError = gate.Err
+	}
+	trace, _ := json.Marshal(traceDoc)
 	kind := req.Kind
 	if kind == "" {
 		kind = "turn"
@@ -275,18 +357,20 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	msgs := append(cctx.Messages, llm.Message{Role: role, Content: speakerLine(role, req.Speaker, req.Input, req.Names)})
 	env := tools.Env{
 		CharacterID: req.Character.ID, ConversationID: conv.ID,
-		Allowed: req.Character.Tools, Now: now, Speaker: req.Speaker,
+		Allowed: toolNames, Now: now, Speaker: req.Speaker,
 		DB: r.db, Loc: set.Loc, Day: day, DayStartsAt: set.DayStartsAt,
 		SourceMessageID: &userMsg.ID, Embedder: r.embedder,
 	}
 
 	var usage llm.Usage
+	usage.InputTokens += gateUsageTotal.InputTokens
+	usage.OutputTokens += gateUsageTotal.OutputTokens
 	webRead := false // a page or search result may carry planted instructions
 	for step := 0; step < r.maxSteps; step++ {
 		var partial strings.Builder
 		resp, err := model.Stream(ctx, llm.Request{
 			Model: modelName, System: cctx.System, Messages: msgs,
-			Tools: r.tools.Specs(req.Character.Tools), Session: conv.ID,
+			Tools: r.tools.Specs(toolNames), Session: conv.ID,
 		}, func(text string) {
 			partial.WriteString(text)
 			emit(Event{Type: "text", Delta: text})
@@ -490,6 +574,43 @@ type contextTrace struct {
 	SummaryUpto         int64    `json:"summary_upto,omitempty"`
 	Truncated           []string `json:"truncated,omitempty"`
 	SystemChars         int      `json:"system_chars"`
+	GateSharedIDs       []string `json:"gate_shared_ids,omitempty"`
+	GateKeptIDs         []string `json:"gate_kept_ids,omitempty"`
+	GateError           string   `json:"gate_error,omitempty"`
+}
+
+// gateTrace is what a room turn records about the share gate.
+type gateTrace struct {
+	SharedIDs []string
+	KeptIDs   []string
+	Err       string
+}
+
+// candidateKeys names candidates the way the gate prompt does (f12, m34).
+func candidateKeys(items []Retrieved) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, candidateKey(it))
+	}
+	return out
+}
+
+// touchFacts counts the facts a room turn actually put in front of the model.
+func touchFacts(ctx context.Context, st Store, items []Retrieved) {
+	var ids []int64
+	for _, it := range items {
+		if it.Kind == "fact" {
+			ids = append(ids, it.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	if s, ok := st.(Searcher); ok {
+		if err := s.TouchFacts(ctx, ids); err != nil {
+			log.Printf("assistant: touch gated facts: %v", err)
+		}
+	}
 }
 
 func summaryUpto(c store.Conversation) int64 {

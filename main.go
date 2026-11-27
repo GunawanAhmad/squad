@@ -133,6 +133,8 @@ func main() {
 		DB:         db,
 		Embedder:   embedder,
 		Memory:     characterMemory(chars, db),
+		Profile:    profilePrompt,
+		GateModel:  gateModel(chars),
 		Settings:   func(ctx context.Context) assistant.Settings { return assistant.LoadSettings(ctx, db) },
 		Now:        assistant.Now,
 		Location:   assistant.TimeZone(),
@@ -188,6 +190,15 @@ func devUI(target *url.URL, fallback http.Handler) http.Handler {
 		fallback.ServeHTTP(w, r)
 	}
 	return proxy
+}
+
+// gateModel is the model id the room share gate runs with: the assistant's
+// model from characters.json, unless settings.jobs_model overrides it.
+func gateModel(chars map[string]Character) string {
+	if c, ok := chars[assistantCharacterID]; ok {
+		return c.Model
+	}
+	return ""
 }
 
 // memoryEnabled reports which characters have their memory stack on. A
