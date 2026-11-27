@@ -29,6 +29,7 @@ type charDraft struct {
 	Persona     string     `json:"persona"`
 	Stats       []charStat `json:"stats"` // personality only; Discretion is added from the field
 	Voice       charVoice  `json:"voice"`
+	Doll        charDoll   `json:"doll"`
 	Discretion  int        `json:"discretion"`
 	Tools       []string   `json:"tools"`
 	Model       string     `json:"model"` // a picker choice: "claude/opus" or a bare opencode model
@@ -43,6 +44,55 @@ type charVoice struct {
 	Pitch         float64 `json:"pitch"`
 	Rate          float64 `json:"rate"`
 	BlipFrequency float64 `json:"blipFrequency"`
+}
+
+// charDoll is the look of the drawn portrait (frontend/src/paperDoll.ts).
+type charDoll struct {
+	Head       string `json:"head"`
+	Build      string `json:"build"`
+	Skin       int    `json:"skin"` // 0 palest to 5 darkest
+	Hair       string `json:"hair"`
+	HairColor  string `json:"hairColor"`
+	Eyes       string `json:"eyes"`
+	FacialHair string `json:"facialHair"`
+	Outfit     string `json:"outfit"`
+	Accessory  string `json:"accessory"`
+}
+
+// dollOptions are the allowed values per trait, default first; paperDoll.ts has the same lists.
+var dollOptions = []struct {
+	name  string
+	field func(*charDoll) *string
+	opts  []string
+}{
+	{"head", func(d *charDoll) *string { return &d.Head }, []string{"human", "robot"}},
+	{"build", func(d *charDoll) *string { return &d.Build }, []string{"average", "slim", "broad"}},
+	{"hair", func(d *charDoll) *string { return &d.Hair }, []string{"short", "none", "bob", "long", "ponytail", "twintails", "curly", "spiky", "bun"}},
+	{"eyes", func(d *charDoll) *string { return &d.Eyes }, []string{"round", "sleepy", "sharp"}},
+	{"facialHair", func(d *charDoll) *string { return &d.FacialHair }, []string{"none", "stubble", "mustache", "beard"}},
+	{"outfit", func(d *charDoll) *string { return &d.Outfit }, []string{"tunic", "jacket", "robe", "armor", "hoodie"}},
+	{"accessory", func(d *charDoll) *string { return &d.Accessory }, []string{"none", "glasses", "headphones", "hat", "scarf"}},
+}
+
+func (d *charDoll) normalize() {
+	for _, o := range dollOptions {
+		if f := o.field(d); !slices.Contains(o.opts, *f) {
+			*f = o.opts[0]
+		}
+	}
+	d.Skin = min(max(d.Skin, 0), 5)
+	if !accentRe.MatchString(d.HairColor) {
+		d.HairColor = "#3b2a20"
+	}
+}
+
+// dollPrompt lists the traits for the model, from dollOptions so the two never drift.
+func dollPrompt() string {
+	parts := []string{"skin 0 (palest) to 5 (darkest)", "hairColor #rrggbb"}
+	for _, o := range dollOptions {
+		parts = append(parts, o.name+" "+strings.Join(o.opts, "|"))
+	}
+	return "Doll (its drawn portrait; match the description): " + strings.Join(parts, "; ") + "."
 }
 
 const (
@@ -61,7 +111,7 @@ var (
 
 const draftSystem = "You design characters for a chat app. Each character is an AI the user talks to one on one or in group rooms. You write vivid, specific characters, never generic assistants unless asked."
 
-const draftSchema = `{"name":"Pip","tagline":"one short line, under 60 characters","description":"one or two sentences for the character card","selectLine":"what the character says when picked, in its own voice","accentColor":"#rrggbb","persona":"the system prompt, written to the character: You are ...","stats":[{"label":"Wit","value":7}],"voice":{"pitch":1.0,"rate":1.0,"blipFrequency":400},"discretion":5}`
+const draftSchema = `{"name":"Pip","tagline":"one short line, under 60 characters","description":"one or two sentences for the character card","selectLine":"what the character says when picked, in its own voice","accentColor":"#rrggbb","persona":"the system prompt, written to the character: You are ...","stats":[{"label":"Wit","value":7}],"voice":{"pitch":1.0,"rate":1.0,"blipFrequency":400},"doll":{"head":"human","build":"average","skin":1,"hair":"short","hairColor":"#3b2a20","eyes":"round","facialHair":"none","outfit":"tunic","accessory":"none"},"discretion":5}`
 
 type draftRequest struct {
 	Description string   `json:"description"`
@@ -100,7 +150,8 @@ func (s *server) handleDraftCharacter(w http.ResponseWriter, r *http.Request) {
 		"Persona: 3-8 sentences in second person, covering who it is, how it speaks, how it helps, and how long its replies are.\n"+
 		"Stats: 3 or 4 personality traits scored 0-10; do not include Discretion.\n"+
 		"Discretion (0-10): how much it would repeat what the user told it privately in front of others.\n"+
-		"Voice: pitch 0.5-2, rate 0.5-1.5, blipFrequency 100-900 (a high, light voice has higher numbers).",
+		"Voice: pitch 0.5-2, rate 0.5-1.5, blipFrequency 100-900 (a high, light voice has higher numbers).\n"+
+		dollPrompt(),
 		desc, tools)
 	raw, _, err := assistant.CallStructured(r.Context(), assistant.StructuredSpec{
 		Model: model, ModelID: modelID, System: draftSystem, Prompt: prompt, Schema: draftSchema, Session: "character-draft",
@@ -203,7 +254,7 @@ func (s *server) buildCharacter(d charDraft) (Character, error) {
 	ui, err := json.Marshal(map[string]any{
 		"tagline": d.Tagline, "description": d.Description, "selectLine": d.SelectLine, "accentColor": d.AccentColor,
 		"stats": append(d.Stats, charStat{Label: "Discretion", Value: d.Discretion}),
-		"voice": d.Voice,
+		"voice": d.Voice, "doll": d.Doll,
 	})
 	if err != nil {
 		return Character{}, err
@@ -306,6 +357,7 @@ func (d *charDraft) normalize() {
 	d.Voice.Pitch = clampOr(d.Voice.Pitch, 0.5, 2, 1)
 	d.Voice.Rate = clampOr(d.Voice.Rate, 0.5, 1.5, 1)
 	d.Voice.BlipFrequency = clampOr(d.Voice.BlipFrequency, 100, 900, 400)
+	d.Doll.normalize()
 	if d.Tools == nil {
 		d.Tools = []string{}
 	}

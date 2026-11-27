@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { api } from '../api';
+import { DOLL_OPTIONS, SKIN, dollURL, normalizeDoll, type Doll } from '../paperDoll';
 import type { Character, CharacterDraft } from '../types';
 
 const props = defineProps<{ chars: Character[] }>();
@@ -14,6 +15,19 @@ const TOOLS = [
   { id: 'recall', label: 'Recall' },
   { id: 'forget', label: 'Forget' },
 ];
+
+// The portrait's traits, editable after the model picks them.
+const LOOK = Object.entries(DOLL_OPTIONS) as [keyof typeof DOLL_OPTIONS, readonly string[]][];
+const LOOK_LABELS: Record<keyof typeof DOLL_OPTIONS, string> = {
+  head: 'Head', build: 'Build', hair: 'Hair style', eyes: 'Eyes', facialHair: 'Facial hair', outfit: 'Outfit', accessory: 'Accessory',
+};
+const SKIN_LABELS = ['Palest', 'Light', 'Tan', 'Brown', 'Dark', 'Darkest'];
+const HAIR_COLORS = ['#2b2230', '#3b2a20', '#7a4a24', '#c98a3c', '#e6d3a3', '#b8b8c0', '#9a3b3b', '#3b6fb0'];
+const pick = <T,>(a: readonly T[]) => a[Math.floor(Math.random() * a.length)];
+function randomDoll(): Doll {
+  const d = Object.fromEntries(LOOK.map(([k, opts]) => [k, pick(opts)]));
+  return { ...d, head: Math.random() < 0.15 ? 'robot' : 'human', skin: Math.floor(Math.random() * SKIN.length), hairColor: pick(HAIR_COLORS) } as Doll;
+}
 
 const description = ref('');
 const tools = ref<string[]>(TOOLS.map((t) => t.id));
@@ -41,10 +55,11 @@ async function run(fn: () => Promise<void>) {
 }
 
 const generate = () => run(async () => {
-  draft.value = await api<CharacterDraft>('/api/characters/draft', {
+  const d = await api<CharacterDraft>('/api/characters/draft', {
     method: 'POST',
     body: JSON.stringify({ description: description.value.trim(), tools: tools.value }),
   });
+  draft.value = { ...d, doll: normalizeDoll(d.doll) }; // the selects need every trait set
 });
 
 const save = () => run(async () => {
@@ -107,6 +122,48 @@ const save = () => run(async () => {
           v-model="draft.accentColor"
           type="color"
         ></label>
+      </div>
+      <div class="char-look">
+        <img
+          class="char-doll"
+          :src="dollURL(draft.doll, 'idle', draft.accentColor)"
+          alt="Portrait preview"
+        >
+        <div class="char-look-side">
+          <button
+            type="button"
+            class="member-chip"
+            @click="draft.doll = randomDoll()"
+          >
+            Randomize look
+          </button>
+          <details>
+            <summary>Adjust look</summary>
+            <div class="char-look-fields">
+              <label
+                v-for="[k, opts] in LOOK"
+                :key="k"
+              >{{ LOOK_LABELS[k] }} <select v-model="draft.doll[k]">
+                <option
+                  v-for="o in opts"
+                  :key="o"
+                  :value="o"
+                >{{ o }}</option>
+              </select></label>
+              <label>Skin <select v-model.number="draft.doll.skin">
+                <option
+                  v-for="(_, i) in SKIN"
+                  :key="i"
+                  :value="i"
+                >{{ SKIN_LABELS[i] }}</option>
+              </select></label>
+              <label class="char-color">Hair <input
+                v-model="draft.doll.hairColor"
+                type="color"
+              ></label>
+            </div>
+          </details>
+        </div>
       </div>
       <label>Tagline <input
         v-model="draft.tagline"

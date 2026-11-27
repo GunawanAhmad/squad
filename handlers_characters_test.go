@@ -32,7 +32,8 @@ func characterServer(t *testing.T, steps ...llm.FakeStep) (*server, *[]Character
 func TestDraftCharacterClampsModelOutput(t *testing.T) {
 	s, _ := characterServer(t, llm.FakeStep{Text: "```json\n" + `{"name":" Mara ","tagline":"Sails.","persona":"You are Mara.",
 		"accentColor":"red","stats":[{"label":"Grit","value":14},{"label":"Discretion","value":2}],
-		"voice":{"pitch":9},"discretion":12}` + "\n```"})
+		"voice":{"pitch":9},"discretion":12,
+		"doll":{"head":"robot","hair":"mohawk","skin":9,"hairColor":"red\"/><x>","outfit":"robe"}}` + "\n```"})
 	w := doJSON(t, s.handler(), "POST", "/api/characters/draft", `{"description":"an old sea captain","tools":["web_search","recall"]}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("draft: %d %s", w.Code, w.Body)
@@ -46,6 +47,11 @@ func TestDraftCharacterClampsModelOutput(t *testing.T) {
 	}
 	if len(d.Stats) != 1 || d.Stats[0] != (charStat{"Grit", 10}) {
 		t.Fatalf("stats: %+v (Discretion must come from the field, values 0-10)", d.Stats)
+	}
+	wantDoll := charDoll{Head: "robot", Build: "average", Skin: 5, Hair: "short", HairColor: "#3b2a20",
+		Eyes: "round", FacialHair: "none", Outfit: "robe", Accessory: "none"}
+	if d.Doll != wantDoll {
+		t.Fatalf("doll: known traits kept, the rest defaulted: %+v", d.Doll)
 	}
 	if strings.Join(d.Tools, ",") != "web_search,recall" || d.Model != "fast" {
 		t.Fatalf("tools/model come from the request and the assistant: %v %q", d.Tools, d.Model)
@@ -78,7 +84,7 @@ func TestCreateCharacterFillsServerFields(t *testing.T) {
 	if !strings.HasPrefix(c.Persona, "You are another Pip.") || !strings.Contains(c.Persona, "use remember") || strings.Contains(c.Persona, "use forget") {
 		t.Fatalf("persona memory paragraph follows the chosen tools: %q", c.Persona)
 	}
-	if !strings.Contains(string(c.UI), `{"label":"Discretion","value":3}`) {
+	if !strings.Contains(string(c.UI), `{"label":"Discretion","value":3}`) || !strings.Contains(string(c.UI), `"doll":{"head":"human"`) {
 		t.Fatalf("ui stats: %s", c.UI)
 	}
 	if _, ok := s.roster.get("pip-2"); !ok {

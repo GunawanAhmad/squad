@@ -1,4 +1,5 @@
 // Shapes of the Go API (handlers.go).
+import type { Doll } from './paperDoll';
 export type PortraitState = 'idle' | 'thinking' | 'talking';
 // The speaker id for the user in rooms and fact provenance.
 export const USER_SPEAKER = 'me';
@@ -7,7 +8,8 @@ export interface Character {
   discretion: number; // 0-10, how much the character shares about you in a room
   ui: {
     tagline: string; description: string; accentColor: string; selectLine: string;
-    portrait?: Record<PortraitState, string>; // characters made in the app have none yet
+    portrait?: Record<PortraitState, string>; // painted; characters made in the app have none
+    doll?: Doll; // traits for the drawn portrait used when there is no painted one
     stats: { label: string; value: number }[]; // value out of 10
     voice: { pitch: number; rate: number; blipFrequency: number };
   };
@@ -18,6 +20,7 @@ export interface CharacterDraft {
   persona: string; discretion: number; tools: string[]; model: string;
   stats: { label: string; value: number }[];
   voice: { pitch: number; rate: number; blipFrequency: number };
+  doll: Doll;
 }
 export interface ToolCall { name: string; args: string; id?: number }
 export interface Message { role: 'user' | 'assistant'; content: string; tools?: ToolCall[] }

@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { dollURL } from '../paperDoll';
 import type { Character, PortraitState } from '../types';
 
 const props = withDefaults(defineProps<{ character: Character; state?: PortraitState }>(), { state: 'idle' });
-const src = computed(() => props.character.ui.portrait?.[props.state] ?? '');
-const failed = ref(''); // src that failed to load; show the generated placeholder instead
-const initials = computed(() => props.character.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase());
+const failed = ref(''); // painted portrait that failed to load; draw the doll instead
+const src = computed(() => {
+  const painted = props.character.ui.portrait?.[props.state];
+  return painted && failed.value !== painted
+    ? painted
+    : dollURL(props.character.ui.doll, props.state, props.character.ui.accentColor);
+});
 </script>
 
 <template>
@@ -15,19 +20,10 @@ const initials = computed(() => props.character.name.split(/\s+/).map((w) => w[0
     :style="{ '--accent': character.ui.accentColor }"
   >
     <img
-      v-if="src && failed !== src"
       :src="src"
       :alt="character.name"
       draggable="false"
       @error="failed = src"
     >
-    <div
-      v-else
-      class="placeholder"
-      role="img"
-      :aria-label="character.name"
-    >
-      {{ initials }}
-    </div>
   </div>
 </template>

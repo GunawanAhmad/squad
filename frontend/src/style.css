@@ -162,7 +162,7 @@ button { font: inherit; color: inherit; }
 .settings-pop label { display: flex; align-items: center; gap: 8px; }
 .settings-pop input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
 
-/* Portrait: image or generated placeholder, with state animations. */
+/* Portrait: painted image or drawn doll, with state animations. */
 .portrait {
   display: flex;
   align-items: flex-end;
@@ -175,23 +175,6 @@ button { font: inherit; color: inherit; }
   max-height: 100%;
   object-fit: contain;
   user-select: none;
-}
-
-.portrait .placeholder {
-  display: grid;
-  place-items: end center;
-  height: 100%;
-  min-height: 60px;
-  aspect-ratio: 3 / 4;
-  max-width: 100%;
-  padding-bottom: 12%;
-  border-radius: 8px;
-  background:
-    radial-gradient(circle at 50% 35%, color-mix(in oklab, var(--accent) 80%, white) 0 18%, transparent 19%),
-    radial-gradient(ellipse at 50% 100%, color-mix(in oklab, var(--accent) 80%, white) 0 38%, transparent 39%),
-    linear-gradient(160deg, var(--accent), #111);
-  color: #0008;
-  font: 700 clamp(20px, 6vw, 64px) var(--display);
 }
 
 /* Head-and-shoulders crop of the full-body portrait, for the rail and reply avatars. */
@@ -211,16 +194,6 @@ button { font: inherit; color: inherit; }
   object-position: 50% 8%;
   transform: scale(1.6);
   transform-origin: 50% 0;
-}
-
-.portrait.mini .placeholder {
-  width: 100%;
-  min-height: 0;
-  aspect-ratio: auto;
-  padding: 0;
-  place-items: center;
-  border-radius: 0;
-  font-size: 14px;
 }
 
 /* The reply avatar carries the portrait states: pulse while thinking, bob while talking. */
@@ -1010,6 +983,13 @@ main > form .game-btn { width: 40px; height: 40px; border-radius: 12px; }
 }
 .char-row { display: flex; gap: 12px; align-items: flex-end; }
 .char-form .char-color { flex: 0 0 auto; }
+.char-look { display: flex; gap: 16px; align-items: center; }
+.char-doll { flex: 0 0 auto; width: 120px; height: 180px; object-fit: contain; }
+.char-look-side { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; flex: 1; min-width: 0; }
+.char-look-side summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.char-look-fields { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin-top: 8px; }
+.char-form .char-look-fields label { flex: 1 1 110px; }
+.char-form .char-look-fields .char-color { flex: 0 0 auto; }
 .char-form input[type="color"] { width: 48px; height: 40px; padding: 2px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-deep); }
 
 /* Room "@" picker, floating above the message box. */
