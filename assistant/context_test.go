@@ -365,3 +365,20 @@ func TestContextBudgets(t *testing.T) {
 		t.Fatalf("history section missing: %v", small.Sections)
 	}
 }
+
+func TestBuildContextLabelsSpeakers(t *testing.T) {
+	c := BuildContext(ContextInput{Character: Character{ID: "socrates"},
+		Names: map[string]string{"me": "the user", "ria": "Ria"},
+		History: []store.Message{
+			{ID: 1, Role: "user", Speaker: "me", Content: "hi all"},
+			{ID: 2, Role: "user", Speaker: "ria", Content: "@Socrates what's up?"},
+			{ID: 3, Role: "assistant", Content: "Who is asking?"},
+			{ID: 4, Role: "user", Content: "plain 1:1"}, // no speaker: unchanged
+		}})
+	want := []string{"[the user]: hi all", "[Ria]: @Socrates what's up?", "Who is asking?", "plain 1:1"}
+	for i, w := range want {
+		if c.Messages[i].Content != w {
+			t.Fatalf("message %d = %q, want %q", i, c.Messages[i].Content, w)
+		}
+	}
+}

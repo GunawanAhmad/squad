@@ -72,6 +72,9 @@ type ContextInput struct {
 	Records   *Records    // nil for persona chats
 	Retrieved []Retrieved // pre-retrieval hits, quoted as data
 	Summary   string      // rolling summary of older messages
+	// Names maps a speaker id to its display name ("me" is "the user"); it
+	// labels room history. Empty in 1:1 chats.
+	Names map[string]string
 }
 
 // BuildContext assembles persona, memory, the day's records, the clock and the
@@ -144,7 +147,7 @@ func BuildContext(in ContextInput) Context {
 	}
 	for _, m := range history {
 		c.MessageIDs = append(c.MessageIDs, m.ID)
-		c.Messages = append(c.Messages, toLLMMessage(m))
+		c.Messages = append(c.Messages, toLLMMessage(m, in.Names))
 	}
 	return c
 }
@@ -158,10 +161,24 @@ func clipRunes(s string, n int) string {
 	return string(r[:n])
 }
 
-func toLLMMessage(m store.Message) llm.Message {
-	out := llm.Message{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
+func toLLMMessage(m store.Message, names map[string]string) llm.Message {
+	out := llm.Message{Role: m.Role, Content: speakerLine(m.Role, m.Speaker, m.Content, names), ToolCallID: m.ToolCallID}
 	if len(m.ToolCalls) > 0 && string(m.ToolCalls) != "null" {
 		_ = json.Unmarshal(m.ToolCalls, &out.ToolCalls)
 	}
 	return out
+}
+
+// speakerLine prefixes a room message with who said it. Content is stored
+// without the label, so nothing is ever labeled twice; an unknown id falls back
+// to the id itself. 1:1 messages have no speaker and stay unchanged.
+func speakerLine(role, speaker, content string, names map[string]string) string {
+	if role != "user" || speaker == "" {
+		return content
+	}
+	name := names[speaker]
+	if name == "" {
+		name = speaker
+	}
+	return "[" + name + "]: " + content
 }

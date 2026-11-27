@@ -29,6 +29,9 @@ type Env struct {
 	ToolCallID      int64          // this call's tool_calls row, stamped on records
 	SourceMessageID *int64         // the user message that triggered the turn
 	Embedder        llm.Embedder   // nil = keyword-only recall (M-10)
+	// Speaker is who said the turn's input in a room (a character id, or
+	// "me"); the remember tool stamps told_by from it. Empty in 1:1 chats.
+	Speaker string
 }
 
 // Result is what a tool returns: text for the model and, for write tools, the

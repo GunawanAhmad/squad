@@ -121,6 +121,11 @@ type TurnRequest struct {
 	Model          string // resolved picker model; empty means Character.Model
 	Kind           string // runs.kind; empty means "turn"
 	Role           string // stored role of Input: user (default) or trigger (check-ins)
+	// Speaker is who said Input in a room (a character id, or "me"). Stored
+	// raw on the message; the prompt labels it from Names.
+	Speaker string
+	// Names maps speaker ids to display names for room history.
+	Names map[string]string
 }
 
 // Event mirrors the NDJSON the frontend already knows.
@@ -140,6 +145,8 @@ type Result struct {
 	AssistantMessageID int64
 	Status             string
 	Usage              llm.Usage
+	// Text is the final assistant text of the turn (the last non-empty reply).
+	Text string
 }
 
 // Turn runs one turn. Only one turn per conversation runs at a time; a second
@@ -224,6 +231,7 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	cctx := BuildContext(ContextInput{
 		Character: req.Character, Memory: memory, History: history, Summary: conv.Summary,
 		Window: r.window, Now: now, Settings: set, Records: records, Retrieved: retrieved,
+		Names: req.Names,
 	})
 
 	retrievedMessages, retrievedFacts := Retrieved{}.splitIDs(retrieved)
@@ -254,7 +262,7 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 		role = "user"
 	}
 	userMsg, err := r.store.AddMessage(ctx, store.Message{
-		ConversationID: conv.ID, Role: role, Content: req.Input, RunID: &runID,
+		ConversationID: conv.ID, Role: role, Content: req.Input, Speaker: req.Speaker, RunID: &runID,
 	})
 	if err != nil {
 		r.finish(ctx, runID, StatusError, err.Error(), llm.Usage{})
@@ -262,10 +270,12 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	}
 	result.UserMessageID = userMsg.ID
 
-	msgs := append(cctx.Messages, llm.Message{Role: role, Content: req.Input})
+	// The stored content is raw; the live copy gets the same speaker label the
+	// next turn will read from history.
+	msgs := append(cctx.Messages, llm.Message{Role: role, Content: speakerLine(role, req.Speaker, req.Input, req.Names)})
 	env := tools.Env{
 		CharacterID: req.Character.ID, ConversationID: conv.ID,
-		Allowed: req.Character.Tools, Now: now,
+		Allowed: req.Character.Tools, Now: now, Speaker: req.Speaker,
 		DB: r.db, Loc: set.Loc, Day: day, DayStartsAt: set.DayStartsAt,
 		SourceMessageID: &userMsg.ID, Embedder: r.embedder,
 	}
@@ -299,6 +309,9 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 
 		usage.InputTokens += resp.Usage.InputTokens
 		usage.OutputTokens += resp.Usage.OutputTokens
+		if resp.Text != "" {
+			result.Text = resp.Text
+		}
 		// Fill missing ids before persisting, so the stored assistant call and
 		// the stored tool result carry the same id.
 		for i := range resp.ToolCalls {

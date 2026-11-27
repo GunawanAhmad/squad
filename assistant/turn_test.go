@@ -490,3 +490,30 @@ func TestPersonaRefusesMemoryWritesAfterWebRead(t *testing.T) {
 		t.Fatalf("recall should still work after a web read: %+v", calls[4])
 	}
 }
+
+func TestTurnStoresSpeaker(t *testing.T) {
+	st := newFakeStore()
+	r, fake := testRunner(st, llm.FakeStep{Text: "They mention a thesis."})
+	res, err := r.Turn(context.Background(), TurnRequest{
+		ConversationID: "c1", Character: testChar, Input: "what's up with the user?",
+		Speaker: "ria", Names: map[string]string{"me": "the user", "ria": "Ria"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != "They mention a thesis." {
+		t.Fatalf("result text: %q", res.Text)
+	}
+	msgs := st.messages()
+	if len(msgs) != 2 || msgs[0].Speaker != "ria" {
+		t.Fatalf("stored input: %+v", msgs)
+	}
+	if strings.HasPrefix(msgs[0].Content, "[") {
+		t.Fatalf("stored content must stay raw: %q", msgs[0].Content)
+	}
+	reqs := fake.Requests()
+	last := reqs[0].Messages[len(reqs[0].Messages)-1]
+	if last.Content != "[Ria]: what's up with the user?" {
+		t.Fatalf("live input label: %q", last.Content)
+	}
+}
