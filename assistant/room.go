@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"squad/store"
@@ -38,11 +39,12 @@ type RoomRequest struct {
 	Input   string
 }
 
-// NextSpeaker finds the first @mentioned member that isn't the current speaker.
-// A mention is "@" followed by the member's whole id or name, case-insensitive;
-// an email's local part is not a mention. A self-mention is skipped, so "thanks
-// @Ria" from Ria ends the chain rather than looping.
-func NextSpeaker(text string, members []Member, current string) string {
+// Mentions lists the @mentioned members other than current, in order of first
+// mention, without repeats. A mention is "@" followed by the member's whole id
+// or name, case-insensitive; an email's local part is not a mention. A
+// self-mention is skipped, so "thanks @Ria" from Ria hands nothing on.
+func Mentions(text string, members []Member, current string) []string {
+	var out []string
 	for i := 0; i < len(text); i++ {
 		if text[i] != '@' {
 			continue
@@ -62,12 +64,12 @@ func NextSpeaker(text string, members []Member, current string) string {
 			if strings.ToLower(m.ID) != token && strings.ToLower(m.Name) != token {
 				continue
 			}
-			if m.ID != current {
-				return m.ID
+			if m.ID != current && !slices.Contains(out, m.ID) {
+				out = append(out, m.ID)
 			}
 		}
 	}
-	return ""
+	return out
 }
 
 func isWordByte(b byte) bool {
@@ -103,19 +105,24 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 	lock.Lock()
 	defer lock.Unlock()
 
-	userCopyID := store.RoomConversationID(req.Room.ID, store.UserSpeaker)
+	userCopyID := req.Room.ConversationID(store.UserSpeaker)
 	names := map[string]string{store.UserSpeaker: "the user"}
 	for _, m := range req.Members {
 		names[m.ID] = m.Name
 	}
 
-	first := NextSpeaker(req.Input, req.Members, "")
-	if first == "" {
-		first = r.lastSpeaker(ctx, userCopyID, req.Members)
+	// Everyone the user mentions speaks, in order; a reply's mentions join the
+	// end of the queue. With no mention, the last character to speak answers.
+	queue := Mentions(req.Input, req.Members, "")
+	if len(queue) == 0 {
+		if last := r.lastSpeaker(ctx, userCopyID, req.Members); last != "" {
+			queue = []string{last}
+		} else {
+			queue = []string{req.Members[0].ID}
+		}
 	}
-	if first == "" {
-		first = req.Members[0].ID
-	}
+	first := queue[0]
+	limit := max(maxRoomTurns, len(queue)) // the user's own mentions always get their turn
 
 	// Everyone but the first speaker hears the user's message now; the first
 	// speaker's copy gets it as the input of its Turn.
@@ -123,7 +130,7 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 		if m.ID == first {
 			continue
 		}
-		if err := r.addRoomMessage(ctx, store.RoomConversationID(req.Room.ID, m.ID), "user", req.Input, store.UserSpeaker); err != nil {
+		if err := r.addRoomMessage(ctx, req.Room.ConversationID(m.ID), "user", req.Input, store.UserSpeaker); err != nil {
 			return err
 		}
 	}
@@ -137,7 +144,8 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 	}
 
 	speaker, heardFrom, text := first, store.UserSpeaker, req.Input
-	for turn := 0; turn < maxRoomTurns; turn++ {
+	queue = queue[1:]
+	for turn := 0; turn < limit; turn++ {
 		member, ok := roomMember(req.Members, speaker)
 		if !ok {
 			return fmt.Errorf("room: speaker %q is not a member", speaker)
@@ -151,7 +159,7 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 
 		emit(Event{Type: "speaker", Name: speaker})
 		res, err := r.Turn(ctx, TurnRequest{
-			ConversationID: store.RoomConversationID(req.Room.ID, speaker),
+			ConversationID: req.Room.ConversationID(speaker),
 			Character:      member.Character,
 			Input:          text,
 			Speaker:        heardFrom,
@@ -165,7 +173,7 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 			// Everyone still hears the words that were said before the failure;
 			// nobody speaks next.
 			if result != "" {
-				if fanOutErr := r.fanOutRoom(ctx, userCopyID, req.Room.ID, req.Members, speaker, "", result); fanOutErr != nil {
+				if fanOutErr := r.fanOutRoom(ctx, userCopyID, req.Room, req.Members, speaker, "", result); fanOutErr != nil {
 					return fanOutErr
 				}
 			}
@@ -175,15 +183,23 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 			return nil
 		}
 
-		next := NextSpeaker(result, req.Members, speaker)
+		for _, id := range Mentions(result, req.Members, speaker) {
+			if !slices.Contains(queue, id) {
+				queue = append(queue, id)
+			}
+		}
+		next := ""
+		if len(queue) > 0 {
+			next, queue = queue[0], queue[1:]
+		}
 		// Only the next speaker's Turn stores the text as its input. At the cap
 		// nobody runs that Turn, so everyone must get the copy now.
-		more := next != "" && turn < maxRoomTurns-1
+		more := next != "" && turn < limit-1
 		inputOwner := ""
 		if more {
 			inputOwner = next
 		}
-		if err := r.fanOutRoom(ctx, userCopyID, req.Room.ID, req.Members, speaker, inputOwner, result); err != nil {
+		if err := r.fanOutRoom(ctx, userCopyID, req.Room, req.Members, speaker, inputOwner, result); err != nil {
 			return err
 		}
 		if !more {
@@ -197,7 +213,7 @@ func (r *Runner) RoomTurn(ctx context.Context, req RoomRequest, emit func(Event)
 // fanOutRoom writes one reply into the user's transcript (as the character)
 // and into every member's copy except the speaker's (its Turn already stored
 // it) and inputOwner (the member whose Turn will store it as its input).
-func (r *Runner) fanOutRoom(ctx context.Context, userCopyID, roomID string, members []Member, speaker, inputOwner, text string) error {
+func (r *Runner) fanOutRoom(ctx context.Context, userCopyID string, room store.Room, members []Member, speaker, inputOwner, text string) error {
 	if err := r.addRoomMessage(ctx, userCopyID, "assistant", text, speaker); err != nil {
 		return err
 	}
@@ -205,7 +221,7 @@ func (r *Runner) fanOutRoom(ctx context.Context, userCopyID, roomID string, memb
 		if m.ID == speaker || m.ID == inputOwner {
 			continue
 		}
-		if err := r.addRoomMessage(ctx, store.RoomConversationID(roomID, m.ID), "user", text, speaker); err != nil {
+		if err := r.addRoomMessage(ctx, room.ConversationID(m.ID), "user", text, speaker); err != nil {
 			return err
 		}
 	}

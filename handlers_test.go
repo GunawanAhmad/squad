@@ -41,7 +41,7 @@ func (m *memStore) CreateRoom(_ context.Context, name string, members []string) 
 	r := store.Room{ID: fmt.Sprintf("%08x", len(m.rooms)+1), Name: name, Members: members, CreatedAt: time.Now()}
 	m.rooms[r.ID] = r
 	for _, p := range append(append([]string(nil), members...), "me") {
-		id := store.RoomConversationID(r.ID, p)
+		id := r.ConversationID(p)
 		m.convs[id] = store.Conversation{ID: id, CharacterID: p, CreatedAt: r.CreatedAt, UpdatedAt: r.CreatedAt}
 	}
 	return r, nil
@@ -53,6 +53,22 @@ func (m *memStore) GetRoom(_ context.Context, id string) (store.Room, error) {
 	r, ok := m.rooms[id]
 	if !ok {
 		return store.Room{}, store.ErrNotFound
+	}
+	return r, nil
+}
+
+func (m *memStore) NewRoomSession(_ context.Context, id string) (store.Room, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.rooms[id]
+	if !ok {
+		return store.Room{}, store.ErrNotFound
+	}
+	r.Session++
+	m.rooms[id] = r
+	for _, p := range append(append([]string(nil), r.Members...), "me") {
+		cid := r.ConversationID(p)
+		m.convs[cid] = store.Conversation{ID: cid, CharacterID: p}
 	}
 	return r, nil
 }

@@ -29,6 +29,7 @@ type apiStore interface {
 	CreateRoom(ctx context.Context, name string, members []string) (store.Room, error)
 	GetRoom(ctx context.Context, id string) (store.Room, error)
 	ListRooms(ctx context.Context) ([]store.Room, error)
+	NewRoomSession(ctx context.Context, id string) (store.Room, error)
 }
 
 var conversationIDRe = regexp.MustCompile(`^[A-Za-z0-9:_-]{1,80}$`)
@@ -84,6 +85,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/rooms", s.handleListRooms)
 	mux.HandleFunc("GET /api/rooms/{id}/messages", s.handleRoomMessages)
 	mux.HandleFunc("POST /api/rooms/{id}/messages", s.handlePostRoomMessage)
+	mux.HandleFunc("POST /api/rooms/{id}/sessions", s.handleNewRoomSession)
 
 	mux.HandleFunc("GET /api/assistant/tasks", s.handleListTasks)
 	mux.HandleFunc("PATCH /api/assistant/tasks/{id}", s.handlePatchTask)

@@ -89,7 +89,7 @@ func (s *server) handleRoomMessages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad limit", http.StatusBadRequest)
 		return
 	}
-	msgs, err := s.db.Messages(r.Context(), store.RoomConversationID(room.ID, store.UserSpeaker), after, limit)
+	msgs, err := s.db.Messages(r.Context(), room.ConversationID(store.UserSpeaker), after, limit)
 	if err != nil {
 		serverError(w, "get room messages", err)
 		return
@@ -99,6 +99,21 @@ func (s *server) handleRoomMessages(w http.ResponseWriter, r *http.Request) {
 		out = append(out, messageJSON(m))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"messages": out})
+}
+
+// handleNewRoomSession starts the room over with empty copies. Old sessions
+// stay stored, so the characters still remember them.
+func (s *server) handleNewRoomSession(w http.ResponseWriter, r *http.Request) {
+	room, ok := s.room(w, r)
+	if !ok {
+		return
+	}
+	room, err := s.db.NewRoomSession(r.Context(), room.ID)
+	if err != nil {
+		serverError(w, "new room session", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, roomJSON(room))
 }
 
 func (s *server) handlePostRoomMessage(w http.ResponseWriter, r *http.Request) {

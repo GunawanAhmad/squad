@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,23 +13,71 @@ import (
 	"squad/tools"
 )
 
-func TestNextSpeaker(t *testing.T) {
-	m := []Member{{ID: "socrates", Name: "Socrates"}, {ID: "ria", Name: "Ria"}}
-	cases := []struct{ name, text, current, want string }{
-		{"by name", "@Ria find this", "", "ria"},
-		{"by id, case-insensitive", "@SOCRATES?", "", "socrates"},
-		{"non-member", "@bob hi", "", ""},
-		{"none", "hello", "", ""},
-		{"self mention ends", "@Ria I'll do it", "ria", ""},
-		{"first other mention wins", "@Ria and @Socrates", "ria", "socrates"},
-		{"email is not a mention", "mail ria@x.com", "", ""},
+func TestMentions(t *testing.T) {
+	m := []Member{{ID: "socrates", Name: "Socrates"}, {ID: "ria", Name: "Ria"}, {ID: "assistant", Name: "Assistant"}}
+	cases := []struct {
+		name, text, current string
+		want                []string
+	}{
+		{"by name", "@Ria find this", "", []string{"ria"}},
+		{"by id, case-insensitive", "@SOCRATES?", "", []string{"socrates"}},
+		{"non-member", "@bob hi", "", nil},
+		{"none", "hello", "", nil},
+		{"self mention skipped", "@Ria I'll do it", "ria", nil},
+		{"all others, in order", "@Ria and @Socrates", "ria", []string{"socrates"}},
+		{"several, in order", "@socrates, can you say hi to @ria", "", []string{"socrates", "ria"}},
+		{"deduped", "@Ria @Assistant @ria", "", []string{"ria", "assistant"}},
+		{"email is not a mention", "mail ria@x.com", "", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := NextSpeaker(tc.text, m, tc.current); got != tc.want {
-				t.Fatalf("NextSpeaker(%q, current %q) = %q, want %q", tc.text, tc.current, got, tc.want)
+			if got := Mentions(tc.text, m, tc.current); !slices.Equal(got, tc.want) {
+				t.Fatalf("Mentions(%q, current %q) = %q, want %q", tc.text, tc.current, got, tc.want)
 			}
 		})
+	}
+}
+
+// Everyone the user mentions gets a turn, even when the first speaker's reply
+// doesn't @mention the next one.
+func TestRoomTurnEveryUserMentionSpeaks(t *testing.T) {
+	db := storetest.New(t)
+	ctx := context.Background()
+	fake := llm.NewFake(
+		llm.FakeStep{Text: "Hi Ria!"},
+		llm.FakeStep{Text: "Hi Socrates!"},
+	)
+	runner, room, members := roomFixture(t, db, fake, "socrates", "ria")
+
+	var spoke []string
+	err := runner.RoomTurn(ctx, RoomRequest{Room: room, Members: members, Input: "@socrates, can you say hi to @ria"}, func(e Event) {
+		if e.Type == "speaker" {
+			spoke = append(spoke, e.Name)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(spoke, []string{"socrates", "ria"}) {
+		t.Fatalf("speaker events: %v", spoke)
+	}
+	// Ria answers what Socrates said, and her copy holds the user's message once.
+	last := fake.Requests()[1].Messages
+	if got := last[len(last)-1].Content; got != "[Socrates]: Hi Ria!" {
+		t.Fatalf("ria's input = %q", got)
+	}
+	ria, err := db.Messages(ctx, room.ConversationID("ria"), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userRows := 0
+	for _, m := range ria {
+		if m.Speaker == "me" {
+			userRows++
+		}
+	}
+	if userRows != 1 {
+		t.Fatalf("ria's copy has the user's message %d times: %+v", userRows, ria)
 	}
 }
 
@@ -82,7 +131,7 @@ func TestRoomTurnChainAndFanOut(t *testing.T) {
 		t.Fatalf("speaker events: %v", spoke)
 	}
 
-	me, err := db.Messages(ctx, store.RoomConversationID(room.ID, "me"), 0, 0)
+	me, err := db.Messages(ctx, room.ConversationID("me"), 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +149,7 @@ func TestRoomTurnChainAndFanOut(t *testing.T) {
 		}
 	}
 
-	soc, err := db.Messages(ctx, store.RoomConversationID(room.ID, "socrates"), 0, 0)
+	soc, err := db.Messages(ctx, room.ConversationID("socrates"), 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +169,7 @@ func TestRoomTurnChainAndFanOut(t *testing.T) {
 		t.Fatalf("socrates's copy: %+v", soc)
 	}
 
-	ria, err := db.Messages(ctx, store.RoomConversationID(room.ID, "ria"), 0, 0)
+	ria, err := db.Messages(ctx, room.ConversationID("ria"), 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +198,7 @@ func TestRoomTurnCapsAtFour(t *testing.T) {
 	}
 	// The fourth reply mentions Ria, but the cap stops anyone from running her
 	// turn. Her copy must still receive the words said in the room.
-	ria, err := db.Messages(context.Background(), store.RoomConversationID(room.ID, "ria"), 0, 0)
+	ria, err := db.Messages(context.Background(), room.ConversationID("ria"), 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +243,7 @@ func TestRoomTurnLastSpeakerBeyondTheWindow(t *testing.T) {
 	fake := llm.NewFake(llm.FakeStep{Text: "Hello again."})
 	runner, room, members := roomFixture(t, db, fake, "socrates", "ria")
 	ctx := context.Background()
-	meID := store.RoomConversationID(room.ID, "me")
+	meID := room.ConversationID("me")
 
 	add := func(role, speaker, content string) {
 		t.Helper()

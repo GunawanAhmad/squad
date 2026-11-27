@@ -112,7 +112,7 @@ func BuildContext(in ContextInput) Context {
 	}
 	if len(in.Listeners) > 0 {
 		system += fit("room", "\n\n<room>\nYou are in a room with "+strings.Join(in.Listeners, ", ")+
-			". Everyone here reads your reply. To hand the turn to another member, @mention them by name; a reply with no mention (or only yourself) ends the conversation after you.\n</room>\n", budgetRoom)
+			". Everyone here reads your reply. To hand the turn to other members, @mention them by name (you can mention several); each one you mention replies after you, in order.\n</room>\n", budgetRoom)
 		sections = append(sections, "room")
 	}
 	if rec != nil {

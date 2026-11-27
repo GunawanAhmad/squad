@@ -110,11 +110,12 @@ calls or web reads. Each member keeps its own copy of the room in the store, so
 per-character search, forget and "what does this character know" keep working
 unchanged; your copy (`me`) is the transcript the UI shows.
 
-- **Who answers.** The member you @mention, by id or name, case-insensitive.
-  With no mention, the last character who spoke in the room answers; in a new
-  room, the first member. A reply that @mentions another member hands the turn
-  to them; a reply with no mention (or only itself) ends the chain. At most 4
-  character turns per message you send.
+- **Who answers.** Every member you @mention, by id or name, case-insensitive,
+  in the order you mention them. With no mention, the last character who spoke
+  in the room answers; in a new room, the first member. Members a reply
+  @mentions join the end of the queue; when the queue is empty the chain ends.
+  At most 4 character turns per message you send, or one for each member you
+  mentioned if that's more.
 - **Discretion.** Every character has a `discretion` from 0 to 10 (default 5).
   Before each room turn a separate **share gate** decides which of that
   character's facts it is willing to bring up in front of these members.
@@ -127,10 +128,14 @@ unchanged; your copy (`me`) is the transcript the UI shows.
   `query_activities`, `list_tasks`, `list_reminders`): both would bypass the
   gate. `remember` and `forget` still work; `remember` can file a fact about
   you or about another member (`about`), limited to the people present.
+- **Sessions.** The + button starts a new session: an empty transcript and
+  empty copies for every member. Old sessions stay stored, so the characters
+  still remember them, as with an old 1:1 chat.
 - **API.** `POST /api/rooms` with `{name, members}`, `GET /api/rooms`,
-  `GET /api/rooms/{id}/messages` (the transcript, each row with a `speaker`),
-  and `POST /api/rooms/{id}/messages` with `{content}`, which streams NDJSON
-  `speaker`/`text`/`tool`/`error` events and then `done`.
+  `GET /api/rooms/{id}/messages` (the current session's transcript, each row
+  with a `speaker`), `POST /api/rooms/{id}/messages` with `{content}`, which
+  streams NDJSON `speaker`/`text`/`tool`/`error` events and then `done`, and
+  `POST /api/rooms/{id}/sessions` to start a new session.
 
 ### The Assistant's day
 

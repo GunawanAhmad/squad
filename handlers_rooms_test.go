@@ -127,6 +127,19 @@ func TestRoomMessagesStream(t *testing.T) {
 		t.Fatalf("ria's reply: %+v", got.Messages[1])
 	}
 
+	// A new session empties the transcript; an unknown room is a 404.
+	if w := doJSON(t, h, "POST", "/api/rooms/"+room.ID+"/sessions", ""); w.Code != http.StatusCreated {
+		t.Fatalf("new session: %d %s", w.Code, w.Body)
+	}
+	w = doJSON(t, h, "GET", "/api/rooms/"+room.ID+"/messages", "")
+	got.Messages = nil
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || len(got.Messages) != 0 {
+		t.Fatalf("after new session: %+v, %v", got.Messages, err)
+	}
+	if w := doJSON(t, h, "POST", "/api/rooms/deadbeef/sessions", ""); w.Code != http.StatusNotFound {
+		t.Fatalf("unknown room session: %d", w.Code)
+	}
+
 	// An unknown room is a 404, in both directions.
 	if w := doJSON(t, h, "GET", "/api/rooms/deadbeef/messages", ""); w.Code != http.StatusNotFound {
 		t.Fatalf("unknown room get: %d", w.Code)

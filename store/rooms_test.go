@@ -21,7 +21,7 @@ func TestCreateRoomMakesOneCopyPerMember(t *testing.T) {
 		t.Fatalf("room id: %q (want 8 hex characters)", r.ID)
 	}
 	for _, p := range []string{"socrates", "ria", "me"} {
-		c, err := db.GetConversation(ctx, store.RoomConversationID(r.ID, p))
+		c, err := db.GetConversation(ctx, r.ConversationID(p))
 		if err != nil {
 			t.Fatalf("conversation for %s: %v", p, err)
 		}
@@ -126,5 +126,50 @@ func TestFactProvenance(t *testing.T) {
 				t.Fatalf("Provenance() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// A new session gives every participant an empty copy; the old session's
+// messages stay in each character's memory.
+func TestNewRoomSession(t *testing.T) {
+	db := storetest.New(t)
+	ctx := context.Background()
+
+	r, err := db.CreateRoom(ctx, "office", []string{"socrates", "ria"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.ConversationID("me") != "room:"+r.ID+":me" {
+		t.Fatalf("session 0 id changed: %q", r.ConversationID("me"))
+	}
+	if _, err := db.AddMessage(ctx, store.Message{ConversationID: r.ConversationID("ria"), Role: "user", Content: "old", Speaker: "me"}); err != nil {
+		t.Fatal(err)
+	}
+
+	next, err := db.NewRoomSession(ctx, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Session != 1 || next.ConversationID("ria") == r.ConversationID("ria") {
+		t.Fatalf("new session: %+v", next)
+	}
+	for _, p := range []string{"socrates", "ria", "me"} {
+		c, err := db.GetConversation(ctx, next.ConversationID(p))
+		if err != nil || c.CharacterID != p {
+			t.Fatalf("session 1 conversation for %s: %+v, %v", p, c, err)
+		}
+		msgs, _ := db.Messages(ctx, next.ConversationID(p), 0, 0)
+		if len(msgs) != 0 {
+			t.Fatalf("session 1 copy for %s is not empty: %+v", p, msgs)
+		}
+	}
+	if got, _ := db.GetRoom(ctx, r.ID); got.Session != 1 {
+		t.Fatalf("GetRoom session = %d", got.Session)
+	}
+	if old, _ := db.Messages(ctx, r.ConversationID("ria"), 0, 0); len(old) != 1 {
+		t.Fatalf("old session lost: %+v", old)
+	}
+	if _, err := db.NewRoomSession(ctx, "deadbeef"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unknown room: %v", err)
 	}
 }

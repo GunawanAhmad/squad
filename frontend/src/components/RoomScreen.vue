@@ -189,8 +189,21 @@ async function send() {
     }
   } finally {
     // A speaker event with no text (a failed turn) leaves an empty bubble.
-    messages.value = list.filter((m) => m.role === 'user' || m.content || m.tools?.length);
+    // After a new session the list is stale: don't bring it back.
+    if (messages.value === list) messages.value = list.filter((m) => m.role === 'user' || m.content || m.tools?.length);
     busy.value = false;
+  }
+}
+
+async function newSession() {
+  if (!confirm(`Start a new session in ${props.room.name}? Past messages stay in each character's memory.`)) return;
+  controller?.abort();
+  busy.value = false;
+  try {
+    await api(`/api/rooms/${props.room.id}/sessions`, { method: 'POST' });
+    messages.value = [];
+  } catch (err) {
+    messages.value.push({ role: 'assistant', content: '⚠️ ' + (err as Error).message, speaker: fallbackChar.value.id });
   }
 }
 </script>
@@ -206,6 +219,23 @@ async function send() {
           <h1>{{ room.name }}</h1>
           <p>{{ subtitle }}</p>
         </div>
+        <GameButton
+          class="icon"
+          aria-label="New session"
+          title="New session"
+          @click="newSession"
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            aria-hidden="true"
+          ><path d="M12 5v14M5 12h14" /></svg>
+        </GameButton>
         <GameButton
           class="icon"
           aria-label="Back"

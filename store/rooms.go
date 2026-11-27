@@ -18,13 +18,18 @@ type Room struct {
 	ID        string
 	Name      string
 	Members   []string
+	Session   int // bumped by NewRoomSession
 	CreatedAt time.Time
 }
 
-// RoomConversationID is the conversation a participant sees the room through.
-// The id stays within conversationIDRe.
-func RoomConversationID(roomID, participant string) string {
-	return "room:" + roomID + ":" + participant
+// ConversationID is the conversation a participant sees the room's current
+// session through. Session 0 keeps the original id, so rooms made before
+// sessions keep their history. The id stays within conversationIDRe.
+func (r Room) ConversationID(participant string) string {
+	if r.Session == 0 {
+		return "room:" + r.ID + ":" + participant
+	}
+	return fmt.Sprintf("room:%s:%d:%s", r.ID, r.Session, participant)
 }
 
 // CreateRoom stores a room and one conversation per member plus the user's
@@ -58,18 +63,45 @@ func (s *Store) CreateRoom(ctx context.Context, name string, members []string) (
 		return Room{}, errors.New("room: could not allocate an id")
 	}
 
-	participants := append(append([]string(nil), members...), UserSpeaker)
-	for _, p := range participants {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO conversations (id, character_id, room_id) VALUES ($1, $2, $3)`,
-			RoomConversationID(r.ID, p), p, r.ID); err != nil {
-			return Room{}, fmt.Errorf("room conversation for %s: %w", p, err)
-		}
+	if err := createRoomConversations(ctx, tx, r); err != nil {
+		return Room{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Room{}, err
 	}
 	return r, nil
+}
+
+// NewRoomSession starts the room over: the session number goes up and every
+// participant gets an empty copy. Old sessions stay stored, so each character
+// still remembers them the way it remembers an old 1:1 chat.
+func (s *Store) NewRoomSession(ctx context.Context, id string) (Room, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Room{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	r, err := scanRoom(tx.QueryRow(ctx, `UPDATE rooms SET session = session + 1 WHERE id = $1 RETURNING `+roomCols, id))
+	if err != nil {
+		return Room{}, err
+	}
+	if err := createRoomConversations(ctx, tx, r); err != nil {
+		return Room{}, err
+	}
+	return r, tx.Commit(ctx)
+}
+
+// createRoomConversations makes one conversation per member plus the user's
+// transcript for the room's current session.
+func createRoomConversations(ctx context.Context, tx pgx.Tx, r Room) error {
+	for _, p := range append(append([]string(nil), r.Members...), UserSpeaker) {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO conversations (id, character_id, room_id) VALUES ($1, $2, $3)`,
+			r.ConversationID(p), p, r.ID); err != nil {
+			return fmt.Errorf("room conversation for %s: %w", p, err)
+		}
+	}
+	return nil
 }
 
 func newRoomID() (string, error) {
@@ -80,11 +112,11 @@ func newRoomID() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-const roomCols = `id, name, members, created_at`
+const roomCols = `id, name, members, session, created_at`
 
 func scanRoom(row pgx.Row) (Room, error) {
 	var r Room
-	err := row.Scan(&r.ID, &r.Name, &r.Members, &r.CreatedAt)
+	err := row.Scan(&r.ID, &r.Name, &r.Members, &r.Session, &r.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Room{}, ErrNotFound
 	}

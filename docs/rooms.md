@@ -20,14 +20,20 @@ part of this work.
 
 1. **1:1 chats don't change.** A room always has at least two characters.
 2. **Members are fixed** when the room is created (v1).
+   **New session** (the + button) starts the room over with an empty
+   transcript. Old sessions stay stored, so each character still remembers
+   them through retrieval and the share gate, the way it remembers an old 1:1
+   chat. To make them truly forget, use the Memory screen.
 3. **Who speaks next:**
-   - When you send a message, the member you @mention answers (by id or
-     name, case-insensitive). With no mention, the last character who spoke
-     in the room answers. In a new room, the first member answers.
-   - A character's reply that @mentions another member hands the turn to
-     them. A reply with no mention, or that mentions only itself, ends the
-     chain.
-   - At most **4 character turns** per message you send.
+   - When you send a message, every member you @mention answers, in the
+     order you mention them (by id or name, case-insensitive). With no
+     mention, the last character who spoke in the room answers. In a new
+     room, the first member answers.
+   - Members that a character's reply @mentions join the end of the queue
+     (a self-mention doesn't count, and nobody is queued twice). When the
+     queue is empty, the chain ends.
+   - At most **4 character turns** per message you send, or one for each
+     member you mentioned if that's more.
 4. **What each character hears:** your messages and the other characters'
    final replies. It does not see another character's tool calls or web reads.
 5. **Discretion.** Each character has `discretion` 0–10 in `characters.json`
