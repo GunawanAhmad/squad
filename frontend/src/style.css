@@ -237,7 +237,7 @@ button { font: inherit; color: inherit; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center; /* plain center pushes the title off the top once content overflows */
   gap: 36px;
   padding: 32px 24px;
   overflow-y: auto;
@@ -949,15 +949,34 @@ main > form .game-btn { width: 40px; height: 40px; border-radius: 12px; }
   background: var(--surface);
 }
 
-.room-form > label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 13px;
+.room-form h3 .muted { font-weight: 400; font-size: 13px; }
+
+.member-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.member-chip {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-deep);
+  color: var(--soft);
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
 }
 
+.member-chip:hover { border-color: color-mix(in oklab, var(--accent) 50%, transparent); }
+
+.member-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 22%, transparent);
+  color: var(--text);
+}
+
+.room-form-row { display: flex; gap: 8px; }
+
 .room-form input[type="text"] {
+  flex: 1;
+  min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -966,29 +985,7 @@ main > form .game-btn { width: 40px; height: 40px; border-radius: 12px; }
   font: inherit;
 }
 
-.room-form fieldset {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
-}
-
-.room-form legend {
-  padding: 0 6px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.room-form .member-pick {
-  flex-direction: row;
-  align-items: center;
-  color: var(--text);
-}
-
 .room-create {
-  align-self: flex-start;
   padding: 10px 16px;
   border: 0;
   border-radius: 10px;

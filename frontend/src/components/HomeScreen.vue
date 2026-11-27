@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { api } from '../api';
 import CharacterPortrait from './CharacterPortrait.vue';
 import type { Character, Room } from '../types';
@@ -18,17 +18,23 @@ function toggle(id: string) {
     : [...selected.value, id];
 }
 
+// Used when the name is left blank: "Ria, Bob, Claude".
+const defaultName = computed(() =>
+  props.chars
+    .filter((c) => selected.value.includes(c.id))
+    .map((c) => c.name)
+    .join(', ')
+    .slice(0, 60),
+);
+
 async function createRoom() {
-  if (selected.value.length < 2 || !name.value.trim()) {
-    error.value = 'Give the room a name and pick at least two characters.';
-    return;
-  }
+  if (selected.value.length < 2) return;
   creating.value = true;
   error.value = '';
   try {
     const room = await api<Room>('/api/rooms', {
       method: 'POST',
-      body: JSON.stringify({ name: name.value.trim(), members: selected.value }),
+      body: JSON.stringify({ name: name.value.trim() || defaultName.value, members: selected.value }),
     });
     name.value = '';
     selected.value = [];
@@ -75,7 +81,7 @@ function memberNames(room: Room) {
       </button>
     </div>
 
-    <section class="rooms">
+    <div class="rooms">
       <h2>Rooms</h2>
       <p class="muted rooms-hint">
         Everyone in a room hears everything said there. You are always in it.
@@ -97,58 +103,52 @@ function memberNames(room: Room) {
           </button>
         </li>
       </ul>
-      <p
-        v-else
-        class="muted"
-      >
-        No rooms yet.
-      </p>
 
       <form
         class="room-form"
         @submit.prevent="createRoom"
       >
-        <h3>New room</h3>
-        <label>
-          Name
+        <h3>New room <span class="muted">· pick two or more</span></h3>
+        <div
+          class="member-chips"
+          role="group"
+          aria-label="Room members"
+        >
+          <button
+            v-for="c in chars"
+            :key="c.id"
+            type="button"
+            class="member-chip"
+            :style="{ '--accent': c.ui.accentColor }"
+            :aria-pressed="selected.includes(c.id)"
+            @click="toggle(c.id)"
+          >
+            {{ c.name }}
+          </button>
+        </div>
+        <div class="room-form-row">
           <input
             v-model="name"
             type="text"
             maxlength="60"
-            placeholder="office"
-            required
+            aria-label="Room name"
+            :placeholder="defaultName || 'Room name (optional)'"
           >
-        </label>
-        <fieldset>
-          <legend>Members (at least two)</legend>
-          <label
-            v-for="c in chars"
-            :key="c.id"
-            class="member-pick"
+          <button
+            class="room-create"
+            type="submit"
+            :disabled="creating || selected.length < 2"
           >
-            <input
-              type="checkbox"
-              :value="c.id"
-              :checked="selected.includes(c.id)"
-              @change="toggle(c.id)"
-            >
-            {{ c.name }}
-          </label>
-        </fieldset>
+            {{ creating ? 'Creating…' : 'Create' }}
+          </button>
+        </div>
         <p
           v-if="error"
           class="notice"
         >
           {{ error }}
         </p>
-        <button
-          class="room-create"
-          type="submit"
-          :disabled="creating || selected.length < 2 || !name.trim()"
-        >
-          {{ creating ? 'Creating…' : 'Create room' }}
-        </button>
       </form>
-    </section>
+    </div>
   </section>
 </template>
