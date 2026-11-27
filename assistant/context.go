@@ -21,7 +21,7 @@ const (
 	budgetToday     = 3000
 	budgetDigest    = 2000
 	budgetRecall    = 1500
-	budgetRoom      = 400
+	budgetRoom      = 700
 	budgetSummary   = 1200
 	truncatedSuffix = "\n…(truncated)\n"
 )
@@ -112,7 +112,7 @@ func BuildContext(in ContextInput) Context {
 	}
 	if len(in.Listeners) > 0 {
 		system += fit("room", "\n\n<room>\nYou are in a room with "+strings.Join(in.Listeners, ", ")+
-			". Everyone here reads your reply. To hand the turn to other members, @mention them by name (you can mention several); each one you mention replies after you, in order.\n</room>\n", budgetRoom)
+			". Everyone here reads your reply, but a member speaks next only if you @mention them. To hand the turn to someone, and whenever you ask or address another member, write @Name, not just the name: \""+in.Listeners[0]+", what do you think?\" gets no answer, \"@"+in.Listeners[0]+", what do you think?\" does. You can mention several; each one replies after you, in order.\n</room>\n", budgetRoom)
 		sections = append(sections, "room")
 	}
 	if rec != nil {
