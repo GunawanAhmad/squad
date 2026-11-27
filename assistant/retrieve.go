@@ -95,7 +95,7 @@ func Retrieve(ctx context.Context, s Searcher, characterID, query string, loc *t
 	}
 	var ids []int64
 	for _, f := range facts {
-		out = append(out, Retrieved{Kind: "fact", ID: f.ID, When: store.DayString(f.ValidFrom), Who: f.Category, Text: clip(f.Text, maxItemRunes)})
+		out = append(out, Retrieved{Kind: "fact", ID: f.ID, When: store.DayString(f.ValidFrom), Who: factWho(f), Text: clip(f.Text, maxItemRunes)})
 		ids = append(ids, f.ID)
 	}
 	if len(ids) > 0 {
@@ -104,6 +104,19 @@ func Retrieve(ctx context.Context, s Searcher, characterID, query string, loc *t
 		}
 	}
 	return out, nil
+}
+
+// factWho is the fact's category plus who it is about and who said it, so a
+// quoted fact is never mistaken for something the user said here.
+func factWho(f store.Fact) string {
+	who := f.Category
+	if f.About != "" && f.About != "me" {
+		who += ", about " + f.About
+	}
+	if f.ToldBy != "" {
+		who += ", heard from " + f.ToldBy
+	}
+	return who
 }
 
 // recallPrompt renders the hits as quoted data in a tag of its own.

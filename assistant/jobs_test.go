@@ -11,6 +11,7 @@ import (
 
 	"squad/llm"
 	"squad/store"
+	"squad/store/storetest"
 )
 
 // Day-close and summary tests use the real store and the fake model: what
@@ -486,5 +487,122 @@ func TestCloseSkipsCharactersWithMemoryOff(t *testing.T) {
 	}
 	if fake.Remaining() != 0 {
 		t.Fatalf("extra model calls: %d", fake.Remaining())
+	}
+}
+
+func TestCloseSetsToldByFromSpeaker(t *testing.T) {
+	now := local(9, 0)
+	ctx := context.Background()
+	st := storetest.New(t)
+	today := LogicalDay(now, testLoc, 4*time.Hour)
+	yesterday := today.AddDate(0, 0, -1)
+	if _, err := st.CreateConversation(ctx, store.Conversation{ID: "room:abc:socrates", CharacterID: "socrates"}); err != nil {
+		t.Fatal(err)
+	}
+	src, err := st.AddMessageAt(ctx, store.Message{
+		ConversationID: "room:abc:socrates", Role: "user", Speaker: "ria",
+		Content: "The user is behind on the thesis.",
+	}, At(yesterday, 5*time.Hour, testLoc))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fake := llm.NewFake(llm.FakeStep{Text: `{"facts":[
+		{"op":"ADD","text":"is behind on the thesis","category":"work","about":"me","told_by":"assistant","source_message_id":` + strconv.FormatInt(src.ID, 10) + `}
+	]}`})
+	runner := New(Config{
+		Store: st, Tools: nil, DB: st,
+		Models:   map[string]llm.Model{string(llm.OpenCodeProvider): fake},
+		Now:      func() time.Time { return now },
+		Location: testLoc,
+		Settings: func(context.Context) Settings {
+			return Settings{TZ: "Asia/Makassar", Loc: testLoc, DayStartsAt: 4 * time.Hour, MorningAt: 8 * time.Hour, EveningAt: 21 * time.Hour}
+		},
+	})
+	e := &Engine{Store: st, Runner: runner, Now: func() time.Time { return now },
+		Char: Character{ID: "socrates", Name: "Socrates", Provider: "opencode", Model: "fake", Persona: "You are Socrates.", Context: "memory"},
+		Setting: func(context.Context) Settings {
+			return Settings{TZ: "Asia/Makassar", Loc: testLoc, DayStartsAt: 4 * time.Hour, MorningAt: 8 * time.Hour, EveningAt: 21 * time.Hour}
+		},
+	}
+	markClosed(t, e, today, 2, 7)
+
+	plan, err := e.Decide(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Close) != 1 || plan.Close[0].CharacterID != "socrates" {
+		t.Fatalf("close plan: %+v", plan.Close)
+	}
+	e.ExecuteJobs(ctx, plan)
+
+	facts, err := st.Facts(ctx, "socrates", store.FactFilter{Status: []string{"active"}})
+	if err != nil || len(facts) != 1 {
+		t.Fatalf("facts: %+v, %v", facts, err)
+	}
+	if facts[0].ToldBy != "ria" {
+		t.Fatalf("told_by came from the model instead of the speaker: %+v", facts[0])
+	}
+	if facts[0].About != "me" {
+		t.Fatalf("about: %+v", facts[0])
+	}
+	prompt := fake.Requests()[0].Messages[0].Content
+	if !strings.Contains(prompt, "[#"+strconv.FormatInt(src.ID, 10)+"] [05:00] ria:") {
+		t.Fatalf("close prompt does not name the speaker:\n%s", prompt)
+	}
+}
+
+func TestCloseRejectsUnknownAbout(t *testing.T) {
+	now := local(9, 0)
+	e, st, _ := newTestEngine(t, now, llm.FakeStep{Text: `{"facts":[
+		{"op":"ADD","text":"is behind on the thesis","category":"work","about":"bob"}
+	]}`})
+	ctx := context.Background()
+	today := LogicalDay(now, testLoc, 4*time.Hour)
+	yesterday := today.AddDate(0, 0, -1)
+	markClosed(t, e, today, 2, 7)
+	seedDayThread(t, st, "assistant", yesterday, "I am behind on the thesis.")
+
+	plan, _ := e.Decide(ctx, now)
+	e.ExecuteJobs(ctx, plan)
+
+	if facts, _ := st.Facts(ctx, "assistant", store.FactFilter{Status: []string{"active"}}); len(facts) != 0 {
+		t.Fatalf("unknown about was applied: %+v", facts)
+	}
+	all, err := st.RunsByKind(ctx, "close")
+	if err != nil || len(all) != 1 {
+		t.Fatalf("runs: %+v, %v", all, err)
+	}
+	if !strings.Contains(string(all[0].Context), "about") {
+		t.Fatalf("reject not recorded: %s", all[0].Context)
+	}
+}
+
+func TestCloseSkipsMeCopy(t *testing.T) {
+	now := local(9, 0)
+	e, st, fake := newTestEngine(t, now)
+	e.MemoryEnabled = func(characterID string) bool { return characterID != "me" }
+	ctx := context.Background()
+	today := LogicalDay(now, testLoc, 4*time.Hour)
+	yesterday := today.AddDate(0, 0, -1)
+	markClosed(t, e, today, 2, 7)
+	if _, err := st.CreateConversation(ctx, store.Conversation{ID: "room:abc:me", CharacterID: "me"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddMessageAt(ctx, store.Message{
+		ConversationID: "room:abc:me", Role: "user", Speaker: "me", Content: "hi all",
+	}, At(yesterday, 5*time.Hour, testLoc)); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := e.Decide(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Close) != 0 {
+		t.Fatalf("the me copy was claimed for closing: %+v", plan.Close)
+	}
+	if fake.Remaining() != 0 {
+		t.Fatalf("model called for the me copy")
 	}
 }

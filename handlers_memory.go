@@ -368,6 +368,7 @@ func factJSON(f store.Fact) map[string]any {
 		"id": f.ID, "characterId": f.CharacterID, "text": f.Text, "category": f.Category, "core": f.Core, "status": f.Status,
 		"sourceKind": f.SourceKind, "validFrom": store.DayString(f.ValidFrom),
 		"useCount": f.UseCount, "createdAt": f.CreatedAt,
+		"about": f.About, "toldBy": f.ToldBy,
 	}
 	if f.ValidTo != nil {
 		out["validTo"] = store.DayString(*f.ValidTo)

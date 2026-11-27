@@ -61,7 +61,7 @@ func TestRememberSupersedes(t *testing.T) {
 	ctx := context.Background()
 
 	old := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
-	bali, err := tools.AddFact(ctx, db, "assistant", "lives in Bali", "circumstance", true, "user", nil, old, nil)
+	bali, err := tools.AddFact(ctx, db, "assistant", "lives in Bali", "circumstance", true, "user", nil, old, nil, "me", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,5 +211,35 @@ func TestRecallHybridFindsCrossLanguage(t *testing.T) {
 	out := runTool(t, env, "recall", `{"query":"burned out"}`)
 	if !strings.Contains(out.Text, "capek banget") {
 		t.Fatalf("hybrid recall: %q", out.Text)
+	}
+}
+
+func TestRememberRecordsToldBy(t *testing.T) {
+	db := storetest.New(t)
+	env, _ := envFor(t, db, "remember")
+	ctx := context.Background()
+
+	env.Speaker = "ria"
+	runTool(t, env, "remember", `{"text":"likes tea","category":"preference"}`)
+	env.Speaker = ""
+	runTool(t, env, "remember", `{"text":"likes coffee","category":"preference"}`)
+	env.Speaker = "me"
+	runTool(t, env, "remember", `{"text":"likes juice","category":"preference"}`)
+
+	facts, err := db.Facts(ctx, "assistant", store.FactFilter{Status: []string{"active"}})
+	if err != nil || len(facts) != 3 {
+		t.Fatalf("facts: %+v, %v", facts, err)
+	}
+	byText := map[string]store.Fact{}
+	for _, f := range facts {
+		byText[f.Text] = f
+	}
+	if f := byText["likes tea"]; f.ToldBy != "ria" || f.About != "me" {
+		t.Fatalf("told from ria: %+v", f)
+	}
+	for _, text := range []string{"likes coffee", "likes juice"} {
+		if f := byText[text]; f.ToldBy != "" || f.About != "me" {
+			t.Fatalf("%s: %+v", text, f)
+		}
 	}
 }

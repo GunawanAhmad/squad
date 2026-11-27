@@ -194,7 +194,7 @@ func (e *Engine) closeDay(ctx context.Context, job CloseJob, set Settings) {
 		Model: model, ModelID: modelID, Session: "day-close",
 		System: "You extract durable facts about the user from one agent's conversations with them. You never give advice and never invent anything.",
 		Prompt: prompt,
-		Schema: `{"facts":[{"op":"ADD|SUPERSEDE|NONE","id":0,"text":"...","category":"preference|person|circumstance|goal|work|health|general","core":false,"source_message_id":0}]}`,
+		Schema: `{"facts":[{"op":"ADD|SUPERSEDE|NONE","id":0,"text":"...","category":"preference|person|circumstance|goal|work|health|general","core":false,"about":"me|<character id>","source_message_id":0}]}`,
 	})
 	if err != nil {
 		log.Printf("close %s/%s: %v", store.DayString(day), characterID, err)
@@ -250,7 +250,21 @@ const closeSystemRules = `Rules:
 - If a new fact contradicts an existing one, SUPERSEDE that fact's id. Otherwise ADD.
 - If nothing durable was said, return {"facts":[]}. Never invent or generalize.
 - text: one short sentence, at most 300 characters.
+- about: "me" when the fact is about the user. When another character in a room says something about the user or themselves, use that character's id instead.
 - source_message_id: the #id of the message this fact came from, copied from the message lines; omit it if unclear.`
+
+// closeFactSuffix names who a fact is about and who said it, so the model can
+// supersede the right row without inventing provenance.
+func closeFactSuffix(f store.Fact) string {
+	out := ""
+	if f.About != "" && f.About != "me" {
+		out += " (about " + f.About + ")"
+	}
+	if f.ToldBy != "" {
+		out += " (heard from " + f.ToldBy + ")"
+	}
+	return out
+}
 
 func closePrompt(characterID string, day time.Time, set Settings, msgs []store.DayMessage, facts []store.Fact) (string, bool) {
 	var b strings.Builder
@@ -259,7 +273,7 @@ func closePrompt(characterID string, day time.Time, set Settings, msgs []store.D
 	if len(facts) > 0 {
 		b.WriteString("Existing active facts:\n")
 		for _, f := range facts {
-			fmt.Fprintf(&b, "- #%d (%s) %s\n", f.ID, f.Category, f.Text)
+			fmt.Fprintf(&b, "- #%d (%s) %s%s\n", f.ID, f.Category, f.Text, closeFactSuffix(f))
 		}
 		b.WriteString("\n")
 	}
@@ -271,8 +285,11 @@ func closePrompt(characterID string, day time.Time, set Settings, msgs []store.D
 			truncated = true
 			break
 		}
-		who := m.CharacterID
-		if m.Role == "user" {
+		who := m.Speaker
+		switch {
+		case m.Role == "assistant" && who == "":
+			who = characterID // its own reply; the copy's owner
+		case who == "" || who == "me":
 			who = "user"
 		}
 		line := fmt.Sprintf("- [#%d] [%s] %s: %s\n", m.ID, m.CreatedAt.In(set.Loc).Format("15:04"), who, clip(m.Content, 700))
@@ -296,6 +313,8 @@ func validateCloseDoc(raw json.RawMessage, characterID string, existing []store.
 			Text            string `json:"text"`
 			Category        string `json:"category"`
 			Core            bool   `json:"core"`
+			About           string `json:"about"`
+			ToldBy          string `json:"told_by"` // ignored: the server derives it
 			SourceMessageID *int64 `json:"source_message_id"`
 		} `json:"facts"`
 	}
@@ -304,9 +323,18 @@ func validateCloseDoc(raw json.RawMessage, characterID string, existing []store.
 		return nil, []string{"document: " + err.Error()}
 	}
 	validSource := map[int64]bool{}
+	allowedAbout := map[string]bool{"me": true}
+	speakerOf := map[int64]string{}
 	for _, m := range msgs {
-		if m.CharacterID == characterID {
-			validSource[m.ID] = true
+		if m.CharacterID != characterID {
+			continue
+		}
+		validSource[m.ID] = true
+		if m.Speaker != "" {
+			speakerOf[m.ID] = m.Speaker
+			if m.Speaker != "me" {
+				allowedAbout[m.Speaker] = true
+			}
 		}
 	}
 	byID := map[int64]store.Fact{}
@@ -360,7 +388,24 @@ func validateCloseDoc(raw json.RawMessage, characterID string, existing []store.
 			rejects = append(rejects, fmt.Sprintf("item %d: source_message_id %d is not from this day", i, *item.SourceMessageID))
 			continue
 		}
-		ops = append(ops, store.FactOp{Op: op, ID: item.ID, Text: text, Category: category, Core: item.Core, SourceMessageID: item.SourceMessageID})
+		about := strings.TrimSpace(item.About)
+		if about == "" {
+			about = "me"
+		}
+		if !allowedAbout[about] {
+			rejects = append(rejects, fmt.Sprintf("item %d: about %q is not a speaker today", i, item.About))
+			continue
+		}
+		// told_by is never taken from the model: it is who said the source
+		// message ("" when the user said it).
+		toldBy := ""
+		if item.SourceMessageID != nil {
+			if sp := speakerOf[*item.SourceMessageID]; sp != "" && sp != "me" {
+				toldBy = sp
+			}
+		}
+		ops = append(ops, store.FactOp{Op: op, ID: item.ID, Text: text, Category: category, Core: item.Core,
+			About: about, ToldBy: toldBy, SourceMessageID: item.SourceMessageID})
 		byText[strings.ToLower(text)] = true
 		if op == "SUPERSEDE" {
 			delete(byID, item.ID) // a second supersede of the same row is invalid

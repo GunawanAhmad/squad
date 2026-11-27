@@ -22,7 +22,7 @@ const maxFact = 300
 // AddFact validates and inserts one fact for one character. Shared by remember
 // and the Memory screen so both reject the same things. There is no unscoped
 // variant: a fact always belongs to exactly one agent.
-func AddFact(ctx context.Context, db *store.Store, characterID, text, category string, core bool, sourceKind string, sourceMessageID *int64, from time.Time, toolCallID *int64) (store.Fact, error) {
+func AddFact(ctx context.Context, db *store.Store, characterID, text, category string, core bool, sourceKind string, sourceMessageID *int64, from time.Time, toolCallID *int64, about, toldBy string) (store.Fact, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return store.Fact{}, fmt.Errorf("%w: text is required", ErrInvalid)
@@ -50,9 +50,12 @@ func AddFact(ctx context.Context, db *store.Store, characterID, text, category s
 			return store.Fact{}, fmt.Errorf("%w: already known as fact #%d", ErrConflict, f.ID)
 		}
 	}
+	if about == "" {
+		about = "me"
+	}
 	return db.AddFact(ctx, store.Fact{
 		CharacterID: characterID, Text: text, Category: category, Core: core, SourceKind: sourceKind,
-		SourceMessageID: sourceMessageID, ValidFrom: from,
+		SourceMessageID: sourceMessageID, ValidFrom: from, About: about, ToldBy: toldBy,
 	})
 }
 
@@ -147,7 +150,13 @@ func rememberTool() *Tool {
 			if strings.TrimSpace(args.Supersedes) != "" {
 				old, candidates, resolveErr = ResolveFact(ctx, env.DB, env.CharacterID, args.Supersedes)
 			}
-			fact, err := AddFact(ctx, env.DB, env.CharacterID, args.Text, args.Category, args.Core, "tool", env.SourceMessageID, recordToday(env), nil)
+			// told_by comes from who spoke, never from the model: a fact heard
+			// from another character in a room says so.
+			toldBy := ""
+			if env.Speaker != "" && env.Speaker != "me" {
+				toldBy = env.Speaker
+			}
+			fact, err := AddFact(ctx, env.DB, env.CharacterID, args.Text, args.Category, args.Core, "tool", env.SourceMessageID, recordToday(env), nil, "me", toldBy)
 			if err != nil {
 				if errors.Is(err, ErrConflict) {
 					return text(err.Error() + "; no new fact stored"), nil
