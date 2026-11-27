@@ -87,6 +87,55 @@ function onEnter(e: KeyboardEvent) {
   send();
 }
 
+// "@" picker: the "@word" just before the caret, if any. The server matches
+// "@" + a member's whole name, so picking inserts the full name.
+const mention = ref<{ start: number; query: string } | null>(null);
+const active = ref(0);
+const matches = computed(() => {
+  if (!mention.value) return [];
+  const q = mention.value.query.toLowerCase();
+  return members.value.filter((c) => c.name.toLowerCase().startsWith(q) || c.id.startsWith(q));
+});
+
+function updateMention() {
+  const el = inputEl.value;
+  if (!el) return;
+  const before = input.value.slice(0, el.selectionStart);
+  const m = /(^|\s)@([^\s@]*)$/.exec(before);
+  mention.value = m ? { start: before.length - m[2].length - 1, query: m[2] } : null;
+  active.value = 0;
+}
+
+function pick(c: Character) {
+  const el = inputEl.value;
+  if (!el || !mention.value) return;
+  const text = `@${c.name} `;
+  const caret = mention.value.start + text.length;
+  input.value = input.value.slice(0, mention.value.start) + text + input.value.slice(el.selectionStart);
+  mention.value = null;
+  nextTick(() => {
+    el.focus();
+    el.setSelectionRange(caret, caret);
+    resize();
+  });
+}
+
+function onKeydown(e: KeyboardEvent) {
+  const n = matches.value.length;
+  if (n && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault();
+    active.value = (active.value + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+  } else if (n && (e.key === 'Enter' || e.key === 'Tab') && !e.isComposing) {
+    e.preventDefault();
+    pick(matches.value[active.value]!);
+  } else if (n && e.key === 'Escape') {
+    e.stopPropagation(); // close the picker, don't leave the room
+    mention.value = null;
+  } else if (e.key === 'Enter') {
+    onEnter(e);
+  }
+}
+
 async function send() {
   const text = input.value.trim();
   if (!text || busy.value || !ready.value) return;
@@ -111,12 +160,12 @@ async function send() {
 
     for await (const e of readNDJSON(res)) {
       if (e.type === 'speaker') {
-        reply = { role: 'assistant', content: '', tools: [], speaker: e.name };
-        list.push(reply);
+        list.push({ role: 'assistant', content: '', tools: [], speaker: e.name });
+        reply = list.at(-1)!; // the reactive proxy, so streamed edits re-render
       } else if (e.type === 'text') {
         if (!reply) { // a model that never announced itself still gets a bubble
-          reply = { role: 'assistant', content: '', tools: [], speaker: fallbackChar.value.id };
-          list.push(reply);
+          list.push({ role: 'assistant', content: '', tools: [], speaker: fallbackChar.value.id });
+          reply = list.at(-1)!;
         }
         reply.content += e.delta;
         const c = charFor(reply.speaker);
@@ -175,7 +224,7 @@ async function send() {
           v-if="!messages.length"
           class="empty"
         >
-          {{ ready ? 'Say something, or @mention who should answer.' : 'Loading…' }}
+          {{ ready ? 'Say something, or type @ to pick who should answer.' : 'Loading…' }}
         </p>
         <ChatMessage
           v-for="(m, i) in messages"
@@ -188,15 +237,41 @@ async function send() {
       </div>
 
       <form @submit.prevent="send">
+        <ul
+          v-if="matches.length"
+          id="mention-list"
+          class="mention-list"
+          role="listbox"
+          aria-label="Mention a member"
+        >
+          <li
+            v-for="(c, i) in matches"
+            :id="`mention-${c.id}`"
+            :key="c.id"
+            role="option"
+            :aria-selected="i === active"
+            :style="{ '--accent': c.ui.accentColor }"
+            @mousedown.prevent="pick(c)"
+            @mouseenter="active = i"
+          >
+            <span class="mention-name">{{ c.name }}</span>
+            <span class="muted">{{ c.ui.tagline }}</span>
+          </li>
+        </ul>
         <textarea
           ref="inputEl"
           v-model="input"
           rows="1"
           :placeholder="ready ? 'Message the room…' : 'Loading…'"
           aria-label="Message the room"
+          aria-controls="mention-list"
+          :aria-expanded="matches.length > 0"
+          :aria-activedescendant="matches.length ? `mention-${matches[active]?.id}` : undefined"
           :disabled="!ready"
-          @input="resize"
-          @keydown.enter="onEnter"
+          @input="resize(); updateMention()"
+          @click="updateMention"
+          @keydown="onKeydown"
+          @blur="mention = null"
         />
         <GameButton
           variant="primary"

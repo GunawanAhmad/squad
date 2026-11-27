@@ -996,3 +996,35 @@ main > form .game-btn { width: 40px; height: 40px; border-radius: 12px; }
 }
 
 .room-create:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Room "@" picker, floating above the message box. */
+.room-screen main > form { position: relative; }
+
+.mention-list {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  min-width: 240px;
+  max-height: 240px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .4);
+  list-style: none;
+}
+
+.mention-list li {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.mention-list li[aria-selected="true"] { background: color-mix(in oklab, var(--accent) 22%, transparent); }
+.mention-name { color: var(--accent); font: 600 14px var(--body); }
