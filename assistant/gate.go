@@ -95,9 +95,10 @@ func Gate(ctx context.Context, in GateInput) (GateResult, llm.Usage) {
 
 	raw, usage, err := CallStructured(ctx, StructuredSpec{
 		Model: in.Model, ModelID: in.ModelID,
-		System: gateSystem,
-		Prompt: prompt,
-		Schema: `{"share": ["f12", "m34"]}`,
+		System:  gateSystem,
+		Prompt:  prompt,
+		Schema:  `{"share": ["f12", "m34"]}`,
+		Session: "share-gate",
 	})
 	if err != nil {
 		return GateResult{Kept: in.Candidates, Err: err.Error()}, usage

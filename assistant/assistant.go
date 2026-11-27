@@ -307,7 +307,7 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	cctx := BuildContext(ContextInput{
 		Character: req.Character, Memory: memory, History: history, Summary: conv.Summary,
 		Window: r.window, Now: now, Settings: set, Records: records, Retrieved: retrieved,
-		Names: req.Names,
+		Names: req.Names, Listeners: req.Listeners,
 	})
 
 	retrievedMessages, retrievedFacts := Retrieved{}.splitIDs(retrieved)

@@ -81,6 +81,9 @@ func TestRoomTurnLoadsOnlySharedFacts(t *testing.T) {
 	if !strings.Contains(system, "profile only") || strings.Contains(system, "one-to-one core facts") {
 		t.Fatalf("room memory must be the profile only:\n%s", system)
 	}
+	if !strings.Contains(system, "<room>") || !strings.Contains(system, "hand the turn") || !strings.Contains(system, "Ria") {
+		t.Fatalf("room note missing from the prompt:\n%s", system)
+	}
 
 	runs, err := db.Runs(ctx, "room:abc:socrates")
 	if err != nil || len(runs) != 1 {
@@ -173,5 +176,8 @@ func TestOneToOneTurnUnchanged(t *testing.T) {
 	}
 	if len(fake.Requests()[0].Tools) != 2 {
 		t.Fatalf("1:1 tools changed: %+v", fake.Requests()[0].Tools)
+	}
+	if strings.Contains(system, "<room>") {
+		t.Fatalf("1:1 prompt got the room note:\n%s", system)
 	}
 }

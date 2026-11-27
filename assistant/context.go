@@ -21,6 +21,7 @@ const (
 	budgetToday     = 3000
 	budgetDigest    = 2000
 	budgetRecall    = 1500
+	budgetRoom      = 400
 	budgetSummary   = 1200
 	truncatedSuffix = "\n…(truncated)\n"
 )
@@ -75,6 +76,9 @@ type ContextInput struct {
 	// Names maps a speaker id to its display name ("me" is "the user"); it
 	// labels room history. Empty in 1:1 chats.
 	Names map[string]string
+	// Listeners are the other characters present. Non-empty means a room turn,
+	// which tells the character how handing the turn by @mention works.
+	Listeners []string
 }
 
 // BuildContext assembles persona, memory, the day's records, the clock and the
@@ -105,6 +109,11 @@ func BuildContext(in ContextInput) Context {
 	if strings.TrimSpace(memory) != "" {
 		system += fit("memory", "\n\n"+memory, budgetMemory)
 		sections = append(sections, "memory")
+	}
+	if len(in.Listeners) > 0 {
+		system += fit("room", "\n\n<room>\nYou are in a room with "+strings.Join(in.Listeners, ", ")+
+			". Everyone here reads your reply. To hand the turn to another member, @mention them by name; a reply with no mention (or only yourself) ends the conversation after you.\n</room>\n", budgetRoom)
+		sections = append(sections, "room")
 	}
 	if rec != nil {
 		today, digest := rec.PromptParts(loc, set.DayStartsAt, now)
