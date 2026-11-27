@@ -139,6 +139,18 @@ func (m *memStore) Messages(_ context.Context, convID string, after int64, limit
 	return out, nil
 }
 
+func (m *memStore) LastSpeaker(_ context.Context, convID string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := len(m.msgs) - 1; i >= 0; i-- {
+		msg := m.msgs[i]
+		if msg.ConversationID == convID && msg.Speaker != "" && msg.Speaker != store.UserSpeaker {
+			return msg.Speaker, nil
+		}
+	}
+	return "", store.ErrNotFound
+}
+
 func (m *memStore) RecentMessagesAfter(ctx context.Context, convID string, after int64, n int) ([]store.Message, error) {
 	all, err := m.Messages(ctx, convID, 0, 0)
 	if err != nil {

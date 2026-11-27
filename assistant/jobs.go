@@ -255,13 +255,6 @@ const closeSystemRules = `Rules:
 
 // closeFactSuffix names who a fact is about and who said it, so the model can
 // supersede the right row without inventing provenance.
-func closeFactSuffix(f store.Fact) string {
-	if p := f.Provenance(); p != "" {
-		return " (" + p + ")"
-	}
-	return ""
-}
-
 func closePrompt(characterID string, day time.Time, set Settings, msgs []store.DayMessage, facts []store.Fact) (string, bool) {
 	var b strings.Builder
 	truncated := false
@@ -269,7 +262,7 @@ func closePrompt(characterID string, day time.Time, set Settings, msgs []store.D
 	if len(facts) > 0 {
 		b.WriteString("Existing active facts:\n")
 		for _, f := range facts {
-			fmt.Fprintf(&b, "- #%d (%s) %s%s\n", f.ID, f.Category, f.Text, closeFactSuffix(f))
+			fmt.Fprintf(&b, "- #%d (%s) %s%s\n", f.ID, f.Category, f.Text, f.ProvenanceNote())
 		}
 		b.WriteString("\n")
 	}
@@ -285,7 +278,7 @@ func closePrompt(characterID string, day time.Time, set Settings, msgs []store.D
 		switch {
 		case m.Role == "assistant" && who == "":
 			who = characterID // its own reply; the copy's owner
-		case who == "" || who == "me":
+		case who == "" || who == store.UserSpeaker:
 			who = "user"
 		}
 		line := fmt.Sprintf("- [#%d] [%s] %s: %s\n", m.ID, m.CreatedAt.In(set.Loc).Format("15:04"), who, clip(m.Content, 700))
@@ -328,7 +321,7 @@ func validateCloseDoc(raw json.RawMessage, characterID string, existing []store.
 		validSource[m.ID] = true
 		if m.Speaker != "" {
 			speakerOf[m.ID] = m.Speaker
-			if m.Speaker != "me" {
+			if m.Speaker != store.UserSpeaker {
 				allowedAbout[m.Speaker] = true
 			}
 		}

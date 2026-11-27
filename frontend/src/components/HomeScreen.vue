@@ -1,24 +1,16 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { ref } from 'vue';
+import { api } from '../api';
 import CharacterPortrait from './CharacterPortrait.vue';
 import type { Character, Room } from '../types';
 
-const props = defineProps<{ chars: Character[] }>();
+const props = defineProps<{ chars: Character[]; rooms: Room[] }>();
 const emit = defineEmits<{ pick: [Character]; openRoom: [Room] }>();
 
-const rooms = ref<Room[]>([]);
 const name = ref('');
 const selected = ref<string[]>([]);
 const creating = ref(false);
 const error = ref('');
-
-onMounted(async () => {
-  try {
-    rooms.value = await (await fetch('/api/rooms')).json();
-  } catch {
-    // The character cards still work; the rooms list can be retried on reload.
-  }
-});
 
 function toggle(id: string) {
   selected.value = selected.value.includes(id)
@@ -34,14 +26,10 @@ async function createRoom() {
   creating.value = true;
   error.value = '';
   try {
-    const res = await fetch('/api/rooms', {
+    const room = await api<Room>('/api/rooms', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: name.value.trim(), members: selected.value }),
     });
-    if (!res.ok) throw new Error((await res.text()).trim() || res.statusText);
-    const room = (await res.json()) as Room;
-    rooms.value.unshift(room);
     name.value = '';
     selected.value = [];
     emit('openRoom', room);

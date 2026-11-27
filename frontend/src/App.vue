@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { api } from './api';
 import { play, settings, unlock } from './audio';
 import CharacterPortrait from './components/CharacterPortrait.vue';
 import ChatScreen from './components/ChatScreen.vue';
@@ -20,9 +21,9 @@ onMounted(async () => {
   // Browsers only allow audio after a user gesture; the first one anywhere unlocks it.
   window.addEventListener('pointerdown', unlock, { once: true });
   window.addEventListener('keydown', unlock, { once: true });
-  chars.value = await (await fetch('/api/characters')).json();
+  chars.value = await api<Character[]>('/api/characters');
   try {
-    rooms.value = await (await fetch('/api/rooms')).json();
+    rooms.value = await api<Room[]>('/api/rooms');
   } catch {
     // The rail still works without the rooms list; a reload retries it.
   }
@@ -144,6 +145,7 @@ function toggleMemory() {
       <HomeScreen
         v-if="screen === 'home'"
         :chars="chars"
+        :rooms="rooms"
         @pick="pick"
         @open-room="openRoom"
       />

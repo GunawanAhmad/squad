@@ -189,24 +189,22 @@ func (s *Store) AddMessage(ctx context.Context, m Message) (Message, error) {
 // Messages returns messages oldest first. With after=0 and a positive limit it
 // returns the newest page (so a long chat opens at the present, not the past);
 // with after>0 it returns the next page after that id. limit <= 0 means all.
-func (s *Store) Messages(ctx context.Context, conversationID string, after int64, limit int) ([]Message, error) {
-	const cols = `id, conversation_id, role, content, COALESCE(speaker, ''), COALESCE(tool_calls, 'null'::jsonb),
-		COALESCE(tool_call_id, ''), run_id, created_at, forgotten_at`
+const messageCols = `id, conversation_id, role, content, COALESCE(speaker, '') AS speaker,
+	COALESCE(tool_calls, 'null'::jsonb) AS tool_calls, COALESCE(tool_call_id, '') AS tool_call_id,
+	run_id, created_at, forgotten_at`
 
+func (s *Store) Messages(ctx context.Context, conversationID string, after int64, limit int) ([]Message, error) {
 	var rows pgx.Rows
 	var err error
 	if after == 0 && limit > 0 {
 		rows, err = s.pool.Query(ctx, `
 			SELECT * FROM (
-				SELECT id, conversation_id, role, content, COALESCE(speaker, '') AS speaker,
-				       COALESCE(tool_calls, 'null'::jsonb) AS tool_calls,
-				       COALESCE(tool_call_id, '') AS tool_call_id,
-				       run_id, created_at, forgotten_at
+				SELECT `+messageCols+`
 				FROM messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT $2
 			) t ORDER BY id`, conversationID, limit)
 	} else {
 		rows, err = s.pool.Query(ctx, `
-			SELECT `+cols+` FROM messages
+			SELECT `+messageCols+` FROM messages
 			WHERE conversation_id = $1 AND id > $2
 			ORDER BY id
 			LIMIT CASE WHEN $3 > 0 THEN $3 END`, conversationID, after, limit)
@@ -257,8 +255,7 @@ func (s *Store) GetMessage(ctx context.Context, characterID string, id int64) (M
 func (s *Store) RecentMessages(ctx context.Context, conversationID string, n int) ([]Message, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT * FROM (
-			SELECT id, conversation_id, role, content, COALESCE(speaker, ''), COALESCE(tool_calls, 'null'::jsonb),
-			       COALESCE(tool_call_id, ''), run_id, created_at, forgotten_at
+			SELECT `+messageCols+`
 			FROM messages WHERE conversation_id = $1 AND forgotten_at IS NULL
 			ORDER BY id DESC LIMIT $2
 		) t ORDER BY id`, conversationID, n)
@@ -281,6 +278,21 @@ func scanMessages(rows pgx.Rows) ([]Message, error) {
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// LastSpeaker returns the most recent explicit character speaker in a
+// conversation (the user's "me" rows and NULL speakers are skipped). It answers
+// "who spoke last" without loading the whole history.
+func (s *Store) LastSpeaker(ctx context.Context, conversationID string) (string, error) {
+	var speaker string
+	err := s.pool.QueryRow(ctx, `
+		SELECT speaker FROM messages
+		WHERE conversation_id = $1 AND speaker IS NOT NULL AND speaker <> $2
+		ORDER BY id DESC LIMIT 1`, conversationID, UserSpeaker).Scan(&speaker)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return speaker, err
 }
 
 func (s *Store) StartRun(ctx context.Context, r Run) (int64, error) {
@@ -365,8 +377,7 @@ func nullIfEmpty(s string) *string {
 func (s *Store) RecentMessagesAfter(ctx context.Context, conversationID string, after int64, n int) ([]Message, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT * FROM (
-			SELECT id, conversation_id, role, content, COALESCE(speaker, ''), COALESCE(tool_calls, 'null'::jsonb),
-			       COALESCE(tool_call_id, ''), run_id, created_at, forgotten_at
+			SELECT `+messageCols+`
 			FROM messages WHERE conversation_id = $1 AND id > $2 AND forgotten_at IS NULL
 			ORDER BY id DESC LIMIT $3
 		) t ORDER BY id`, conversationID, after, n)

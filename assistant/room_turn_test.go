@@ -138,20 +138,17 @@ func TestRoomTurnHasNoRecall(t *testing.T) {
 	fake := llm.NewFake(llm.FakeStep{Text: "Who is asking?"})
 	r := roomRunner(t, db, fake, func() string { return "" })
 	char := Character{ID: "socrates", Name: "Socrates", Provider: "opencode", Model: "fake",
-		Persona: "You are Socrates.", Context: "memory", Tools: []string{"remember", "recall"}}
+		Persona: "You are Socrates.", Context: "memory",
+		Tools: []string{"remember", "recall", "get_overview", "get_summary", "query_activities", "list_tasks", "list_reminders"}}
 	if _, err := r.Turn(ctx, TurnRequest{
 		ConversationID: "room:abc:socrates", Character: char, Input: "hello",
 		Speaker: "ria", Listeners: []string{"Ria"},
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	for _, spec := range fake.Requests()[0].Tools {
-		if spec.Name == "recall" {
-			t.Fatalf("room turn offered recall: %+v", fake.Requests()[0].Tools)
-		}
-	}
-	if len(fake.Requests()[0].Tools) != 1 {
-		t.Fatalf("tools: %+v", fake.Requests()[0].Tools)
+	got := fake.Requests()[0].Tools
+	if len(got) != 1 || got[0].Name != "remember" {
+		t.Fatalf("room tools: %+v (want remember only)", got)
 	}
 }
 

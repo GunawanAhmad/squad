@@ -188,3 +188,37 @@ func TestRoomTurnDefaultsToLastSpeaker(t *testing.T) {
 		t.Fatalf("second message answered by %v, want ria", spoke)
 	}
 }
+
+func TestRoomTurnLastSpeakerBeyondTheWindow(t *testing.T) {
+	db := storetest.New(t)
+	fake := llm.NewFake(llm.FakeStep{Text: "Hello again."})
+	runner, room, members := roomFixture(t, db, fake, "socrates", "ria")
+	ctx := context.Background()
+	meID := store.RoomConversationID(room.ID, "me")
+
+	add := func(role, speaker, content string) {
+		t.Helper()
+		if _, err := db.AddMessage(ctx, store.Message{ConversationID: meID, Role: role, Content: content, Speaker: speaker}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 60; i++ {
+		add("user", "me", "filler")
+	}
+	add("assistant", "socrates", "I spoke last.")
+	for i := 0; i < 60; i++ {
+		add("user", "me", "filler")
+	}
+
+	var spoke []string
+	if err := runner.RoomTurn(ctx, RoomRequest{Room: room, Members: members, Input: "anyone there?"}, func(e Event) {
+		if e.Type == "speaker" {
+			spoke = append(spoke, e.Name)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(spoke) != 1 || spoke[0] != "socrates" {
+		t.Fatalf("answered by %v, want socrates (the last speaker, 61 messages back)", spoke)
+	}
+}

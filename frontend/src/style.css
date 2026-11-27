@@ -16,6 +16,8 @@
   --muted: #9a9aae;
   --border: rgba(255, 255, 255, .08);
   --code-bg: #0d0d16;
+  --surface: #12121b;
+  --surface-deep: #0b0b12;
   --display: "Chakra Petch", system-ui, sans-serif;
   --body: Inter, system-ui, sans-serif;
   color-scheme: dark;
@@ -923,7 +925,7 @@ main > form .game-btn { width: 40px; height: 40px; border-radius: 12px; }
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: #12121b;
+  background: var(--surface);
   color: var(--text);
   text-align: left;
   cursor: pointer;
@@ -944,7 +946,7 @@ main > form .game-btn { width: 40px; height: 40px; border-radius: 12px; }
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: #12121b;
+  background: var(--surface);
 }
 
 .room-form > label {
@@ -959,7 +961,7 @@ main > form .game-btn { width: 40px; height: 40px; border-radius: 12px; }
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #0b0b12;
+  background: var(--surface-deep);
   color: var(--text);
   font: inherit;
 }
@@ -979,11 +981,10 @@ main > form .game-btn { width: 40px; height: 40px; border-radius: 12px; }
   font-size: 12px;
 }
 
-.member-pick {
-  flex-direction: row !important;
+.room-form .member-pick {
+  flex-direction: row;
   align-items: center;
-  gap: 6px !important;
-  color: var(--text) !important;
+  color: var(--text);
 }
 
 .room-create {

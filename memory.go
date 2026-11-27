@@ -109,13 +109,6 @@ func readProfile() string {
 
 // factSuffix says who a fact is about and where it came from, when that is not
 // the user speaking about themselves.
-func factSuffix(f store.Fact) string {
-	if p := f.Provenance(); p != "" {
-		return " (" + p + ")"
-	}
-	return ""
-}
-
 // profilePrompt is the room-mode memory block: profile.md only. The user wrote
 // it for everyone, so it is not gated by the share gate.
 func profilePrompt() string {
@@ -140,7 +133,7 @@ func memoryPrompt(profile string, facts []store.Fact) string {
 		used := 0
 		shown := 0
 		for _, f := range facts {
-			line := fmt.Sprintf("- [%d] (%s) %s%s\n", f.ID, f.Category, f.Text, factSuffix(f))
+			line := fmt.Sprintf("- [%d] (%s) %s%s\n", f.ID, f.Category, f.Text, f.ProvenanceNote())
 			if used+len(line) > coreFactsBudget {
 				break
 			}
@@ -151,7 +144,7 @@ func memoryPrompt(profile string, facts []store.Fact) string {
 		if shown == 0 {
 			// One fact is longer than the budget; show it truncated rather
 			// than nothing at all.
-			line := fmt.Sprintf("- [%d] (%s) %s%s\n", facts[0].ID, facts[0].Category, facts[0].Text, factSuffix(facts[0]))
+			line := fmt.Sprintf("- [%d] (%s) %s%s\n", facts[0].ID, facts[0].Category, facts[0].Text, facts[0].ProvenanceNote())
 			b.WriteString(line[:min(len(line), coreFactsBudget)])
 		}
 		b.WriteString("</facts>\n")

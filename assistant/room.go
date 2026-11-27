@@ -4,10 +4,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
+	"squad/llm"
 	"squad/store"
 )
+
+// roomHiddenTools would bypass the share gate or expose the assistant's private
+// day records. Writes (remember, forget, plans) stay available.
+var roomHiddenTools = map[string]bool{
+	"recall":           true, // searches private history directly
+	"get_overview":     true,
+	"get_summary":      true,
+	"query_activities": true,
+	"list_tasks":       true,
+	"list_reminders":   true,
+}
 
 // maxRoomTurns caps one user message: a room is a conversation, not a runaway
 // chain of agents talking to each other.
@@ -197,16 +210,64 @@ func (r *Runner) fanOutRoom(ctx context.Context, meID, roomID string, members []
 
 // lastSpeaker is the latest character that spoke in the user's copy, or "".
 func (r *Runner) lastSpeaker(ctx context.Context, meID string, members []Member) string {
-	msgs, err := r.store.RecentMessages(ctx, meID, 50)
+	id, err := r.store.LastSpeaker(ctx, meID)
 	if err != nil {
 		return ""
 	}
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if _, ok := roomMember(members, msgs[i].Speaker); ok {
-			return msgs[i].Speaker
-		}
+	if _, ok := roomMember(members, id); ok {
+		return id
 	}
 	return ""
+}
+
+// roomGate builds the character's private candidates (its core facts plus the
+// pre-retrieval hits) and asks the share gate which may be said in front of the
+// listeners. It always fails closed: on any error nothing is shared.
+func (r *Runner) roomGate(ctx context.Context, char Character, listeners []string, question, modelName string, set Settings, retrieved []Retrieved) ([]Retrieved, *gateTrace, llm.Usage) {
+	var candidates []Retrieved
+	if searcher, ok := r.store.(Searcher); ok && char.hasMemory() {
+		facts, err := searcher.CoreFacts(ctx, char.ID, 20)
+		if err != nil {
+			log.Printf("assistant: room core facts: %v", err)
+		}
+		seen := map[string]bool{}
+		add := func(item Retrieved) {
+			key := candidateKey(item)
+			if !seen[key] {
+				seen[key] = true
+				candidates = append(candidates, item)
+			}
+		}
+		for _, f := range facts {
+			add(Retrieved{Kind: "fact", ID: f.ID, When: store.DayString(f.ValidFrom), Who: f.Category, Text: f.Text})
+		}
+		for _, hit := range retrieved {
+			add(hit)
+		}
+	}
+
+	gateID := r.gateModel
+	if set.JobsModel != "" {
+		gateID = set.JobsModel
+	}
+	if gateID == "" {
+		gateID = modelName // the character's resolved model
+	}
+	gateClient, err := r.modelFor(string(llm.OpenCodeProvider))
+	if err != nil {
+		log.Printf("assistant: share gate: %v", err)
+		return nil, &gateTrace{Err: err.Error(), KeptIDs: candidateKeys(candidates)}, llm.Usage{}
+	}
+	res, usage := Gate(ctx, GateInput{
+		Model: gateClient, ModelID: gateID, Character: char,
+		Listeners: listeners, Question: question, Candidates: candidates,
+	})
+	trace := &gateTrace{SharedIDs: candidateKeys(res.Shared), KeptIDs: candidateKeys(res.Kept), Err: res.Err}
+	if res.Err != "" {
+		log.Printf("assistant: share gate failed closed: %s", res.Err)
+	}
+	touchFacts(ctx, r.store, res.Shared)
+	return res.Shared, trace, usage
 }
 
 func (r *Runner) addRoomMessage(ctx context.Context, conversationID, role, content, speaker string) error {

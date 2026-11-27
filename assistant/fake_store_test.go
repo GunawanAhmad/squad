@@ -47,6 +47,18 @@ func (f *fakeStore) AddMessage(_ context.Context, m store.Message) (store.Messag
 	return m, nil
 }
 
+func (f *fakeStore) LastSpeaker(_ context.Context, conversationID string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.msgs) - 1; i >= 0; i-- {
+		m := f.msgs[i]
+		if m.ConversationID == conversationID && m.Speaker != "" && m.Speaker != store.UserSpeaker {
+			return m.Speaker, nil
+		}
+	}
+	return "", store.ErrNotFound
+}
+
 func (f *fakeStore) RecentMessagesAfter(ctx context.Context, conversationID string, after int64, n int) ([]store.Message, error) {
 	all, err := f.RecentMessages(ctx, conversationID, 0)
 	if err != nil {

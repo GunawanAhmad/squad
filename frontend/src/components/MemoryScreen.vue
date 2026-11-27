@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { play } from '../audio';
+import { api } from '../api';
 import GameButton from './GameButton.vue';
-import type { Character, Fact, MemoryHit } from '../types';
+import { USER_SPEAKER, type Character, type Fact, type MemoryHit } from '../types';
 
 const emit = defineEmits<{ back: [] }>();
 
@@ -24,13 +25,6 @@ const forgetDay = ref('');
 const busy = ref(false);
 
 const categories = ['', 'preference', 'person', 'circumstance', 'goal', 'work', 'health', 'general'];
-
-async function api<T>(path: string, init?: Parameters<typeof fetch>[1]): Promise<T> {
-  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init });
-  if (!res.ok) throw new Error((await res.text()).trim() || res.statusText);
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
-}
 
 // scoped adds the selected character to a path that has no character yet.
 function scoped(path: string): string {
@@ -265,7 +259,7 @@ async function forgetWholeDay() {
               {{ f.text }}
               <span class="muted">({{ f.category }}, {{ f.validFrom }}<template v-if="f.validTo">–{{ f.validTo }}</template>)</span>
               <span
-                v-if="f.about && f.about !== 'me'"
+                v-if="f.about && f.about !== USER_SPEAKER"
                 class="muted"
               > · about {{ f.about }}</span>
               <span
@@ -325,7 +319,7 @@ async function forgetWholeDay() {
             >
               <strong>#{{ h.id }}</strong> {{ h.text }} <span class="muted">({{ h.status }}, {{ h.validFrom }}<template v-if="h.validTo">–{{ h.validTo }}</template>)</span>
               <span
-                v-if="h.about && h.about !== 'me'"
+                v-if="h.about && h.about !== USER_SPEAKER"
                 class="muted"
               > · about {{ h.about }}</span>
               <span

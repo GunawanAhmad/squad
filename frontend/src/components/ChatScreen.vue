@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { api } from '../api';
 import { blip, play } from '../audio';
+import { readNDJSON } from '../ndjson';
 import ChatMessage from './ChatMessage.vue';
 import GameButton from './GameButton.vue';
 import GameSelect from './GameSelect.vue';
 import type {
   Activity, AssistantSettings, Character, Conversation, DueResult, LegacyChat, Message,
-  PortraitState, Reminder, StoredMessage, StreamEvent, Task,
+  PortraitState, Reminder, StoredMessage, Task,
 } from '../types';
 
 const props = defineProps<{ character: Character }>();
@@ -227,13 +229,6 @@ async function clear() {
   } catch (err) {
     messages.value.push({ role: 'assistant', content: '⚠️ ' + (err as Error).message });
   }
-}
-
-async function api<T>(path: string, init?: Parameters<typeof fetch>[1]): Promise<T> {
-  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init });
-  if (!res.ok) throw new Error((await res.text()).trim() || res.statusText);
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
 }
 
 // ---- daily loop -----------------------------------------------------------
@@ -476,23 +471,13 @@ async function send() {
     });
     if (!res.ok) throw new Error(await res.text());
 
-    const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
-    let buf = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += value;
-      const lines = buf.split('\n');
-      buf = lines.pop()!; // split always returns at least one element
-      for (const line of lines.filter(Boolean)) {
-        const e: StreamEvent = JSON.parse(line);
-        if (e.type === 'text') {
-          reply.content += e.delta;
-          blip(c.ui.voice.blipFrequency);
-        } else if (e.type === 'tool') reply.tools!.push({ name: e.name, args: e.args, id: e.id });
-        else if (e.type === 'done') lastId.value = Math.max(lastId.value, e.assistantMessageId ?? 0);
-        else if (e.type === 'error') throw new Error(e.message);
-      }
+    for await (const e of readNDJSON(res)) {
+      if (e.type === 'text') {
+        reply.content += e.delta;
+        blip(c.ui.voice.blipFrequency);
+      } else if (e.type === 'tool') reply.tools!.push({ name: e.name, args: e.args, id: e.id });
+      else if (e.type === 'done') lastId.value = Math.max(lastId.value, e.assistantMessageId ?? 0);
+      else if (e.type === 'error') throw new Error(e.message);
     }
     play('arrive');
   } catch (err) {

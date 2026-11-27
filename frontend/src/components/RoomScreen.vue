@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { api } from '../api';
 import { blip, play } from '../audio';
+import { readNDJSON } from '../ndjson';
 import ChatMessage from './ChatMessage.vue';
 import GameButton from './GameButton.vue';
-import type { Character, Message, PortraitState, Room, StoredMessage, StreamEvent } from '../types';
+import type { Character, Message, PortraitState, Room, StoredMessage } from '../types';
 
 const props = defineProps<{ room: Room; chars: Character[] }>();
 const emit = defineEmits<{ back: [] }>();
@@ -25,6 +27,8 @@ const members = computed(() =>
     .filter((c): c is Character => Boolean(c)),
 );
 const accent = computed(() => members.value[0]?.ui.accentColor ?? '#8b7bff');
+// One fallback for user rows and for a character that left characters.json.
+const fallbackChar = computed<Character>(() => members.value[0] ?? props.chars[0]!);
 const subtitle = computed(() => members.value.map((c) => c.name).join(' · '));
 
 function charFor(id?: string): Character | undefined {
@@ -37,12 +41,6 @@ function stateFor(i: number): PortraitState {
 }
 
 watch(messages, () => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight; }, { deep: true, flush: 'post' });
-
-async function api<T>(path: string, init?: Parameters<typeof fetch>[1]): Promise<T> {
-  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init });
-  if (!res.ok) throw new Error((await res.text()).trim() || res.statusText);
-  return (await res.json()) as T;
-}
 
 async function load() {
   const res = await api<{ messages: StoredMessage[] }>(`/api/rooms/${props.room.id}/messages`);
@@ -111,32 +109,22 @@ async function send() {
     });
     if (!res.ok) throw new Error(await res.text());
 
-    const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
-    let buf = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += value;
-      const lines = buf.split('\n');
-      buf = lines.pop()!;
-      for (const line of lines.filter(Boolean)) {
-        const e: StreamEvent = JSON.parse(line);
-        if (e.type === 'speaker') {
-          reply = { role: 'assistant', content: '', tools: [], speaker: e.name };
+    for await (const e of readNDJSON(res)) {
+      if (e.type === 'speaker') {
+        reply = { role: 'assistant', content: '', tools: [], speaker: e.name };
+        list.push(reply);
+      } else if (e.type === 'text') {
+        if (!reply) { // a model that never announced itself still gets a bubble
+          reply = { role: 'assistant', content: '', tools: [], speaker: fallbackChar.value.id };
           list.push(reply);
-        } else if (e.type === 'text') {
-          if (!reply) { // a model that never announced itself still gets a bubble
-            reply = { role: 'assistant', content: '', tools: [], speaker: props.room.members[0] };
-            list.push(reply);
-          }
-          reply.content += e.delta;
-          const c = charFor(reply.speaker);
-          if (c) blip(c.ui.voice.blipFrequency);
-        } else if (e.type === 'tool' && reply) {
-          reply.tools!.push({ name: e.name, args: e.args, id: e.id });
-        } else if (e.type === 'error') {
-          throw new Error(e.message);
         }
+        reply.content += e.delta;
+        const c = charFor(reply.speaker);
+        if (c) blip(c.ui.voice.blipFrequency);
+      } else if (e.type === 'tool' && reply) {
+        reply.tools!.push({ name: e.name, args: e.args, id: e.id });
+      } else if (e.type === 'error') {
+        throw new Error(e.message);
       }
     }
     play('arrive');
@@ -147,7 +135,7 @@ async function send() {
       if (last?.role === 'assistant' && last.speaker) {
         last.content += (last.content ? '\n\n' : '') + '⚠️ ' + e.message;
       } else {
-        list.push({ role: 'assistant', content: '⚠️ ' + e.message, speaker: props.room.members[0] });
+        list.push({ role: 'assistant', content: '⚠️ ' + e.message, speaker: fallbackChar.value.id });
       }
     }
   } finally {
@@ -193,7 +181,7 @@ async function send() {
           v-for="(m, i) in messages"
           :key="i"
           :message="m"
-          :character="charFor(m.speaker) ?? chars[0]!"
+          :character="charFor(m.speaker) ?? fallbackChar"
           :show-name="m.role === 'assistant' && messages[i - 1]?.speaker !== m.speaker"
           :state="stateFor(i)"
         />

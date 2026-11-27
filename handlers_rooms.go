@@ -86,7 +86,7 @@ func (s *server) handleRoomMessages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad limit", http.StatusBadRequest)
 		return
 	}
-	msgs, err := s.db.Messages(r.Context(), store.RoomConversationID(room.ID, "me"), after, limit)
+	msgs, err := s.db.Messages(r.Context(), store.RoomConversationID(room.ID, store.UserSpeaker), after, limit)
 	if err != nil {
 		serverError(w, "get room messages", err)
 		return

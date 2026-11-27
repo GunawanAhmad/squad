@@ -122,8 +122,10 @@ unchanged; your copy (`me`) is the transcript the UI shows.
   money, relationships and confidences; 8–10 does not repeat what you told it
   and points the asker to you. Only approved facts enter the prompt, and if the
   gate fails nothing is shared. `profile.md` is not gated: you wrote it for
-  everyone. There is no `recall` in rooms (it would bypass the gate);
-  `remember` and `forget` still work.
+  everyone. Rooms do not load the Assistant's day records, and they take away
+  the tools that would read them (`recall`, `get_overview`, `get_summary`,
+  `query_activities`, `list_tasks`, `list_reminders`): both would bypass the
+  gate. `remember` and `forget` still work.
 - **API.** `POST /api/rooms` with `{name, members}`, `GET /api/rooms`,
   `GET /api/rooms/{id}/messages` (the transcript, each row with a `speaker`),
   and `POST /api/rooms/{id}/messages` with `{content}`, which streams NDJSON

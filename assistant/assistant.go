@@ -35,6 +35,7 @@ type Store interface {
 	CreateConversation(ctx context.Context, c store.Conversation) (store.Conversation, error)
 	AddMessage(ctx context.Context, m store.Message) (store.Message, error)
 	RecentMessages(ctx context.Context, conversationID string, n int) ([]store.Message, error)
+	LastSpeaker(ctx context.Context, conversationID string) (string, error)
 	RecentMessagesAfter(ctx context.Context, conversationID string, after int64, n int) ([]store.Message, error)
 	StartRun(ctx context.Context, r store.Run) (int64, error)
 	FinishRun(ctx context.Context, id int64, status, errMsg string, inputTokens, outputTokens *int) error
@@ -226,10 +227,11 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	} else if r.memory != nil {
 		memory = r.memory(req.Character.ID)
 	}
-	// In a room the character loses recall: it would bypass the share gate.
+	// In a room the character loses the tools that would bypass the gate or
+	// expose the assistant's private day.
 	toolNames := req.Character.Tools
 	if room {
-		toolNames = slices.DeleteFunc(slices.Clone(req.Character.Tools), func(n string) bool { return n == "recall" })
+		toolNames = slices.DeleteFunc(slices.Clone(req.Character.Tools), func(n string) bool { return roomHiddenTools[n] })
 	}
 	now := r.now()
 	set := r.settingsFor(ctx)
@@ -259,55 +261,9 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 	}
 
 	var gate *gateTrace
-	var gateUsageTotal llm.Usage
+	var gateUsage llm.Usage
 	if room {
-		var candidates []Retrieved
-		if searcher, ok := r.store.(Searcher); ok && req.Character.hasMemory() {
-			facts, err := searcher.CoreFacts(ctx, req.Character.ID, 20)
-			if err != nil {
-				log.Printf("assistant: room core facts: %v", err)
-			}
-			seen := map[string]bool{}
-			add := func(r Retrieved) {
-				key := candidateKey(r)
-				if !seen[key] {
-					seen[key] = true
-					candidates = append(candidates, r)
-				}
-			}
-			for _, f := range facts {
-				add(Retrieved{Kind: "fact", ID: f.ID, When: store.DayString(f.ValidFrom), Who: f.Category, Text: f.Text})
-			}
-			for _, h := range retrieved {
-				add(h)
-			}
-		}
-		gateModelID := r.gateModel
-		if set.JobsModel != "" {
-			gateModelID = set.JobsModel
-		}
-		if gateModelID == "" {
-			gateModelID = modelName // the character's resolved model
-		}
-		gateModel, err := r.modelFor(string(llm.OpenCodeProvider))
-		if err != nil {
-			log.Printf("assistant: share gate: %v", err)
-			gate = &gateTrace{Err: err.Error(), KeptIDs: candidateKeys(candidates)}
-			retrieved = nil
-		} else {
-			res, gateUsage := Gate(ctx, GateInput{
-				Model: gateModel, ModelID: gateModelID, Character: req.Character,
-				Listeners: req.Listeners, Question: req.Input, Candidates: candidates,
-			})
-			gateUsageTotal.InputTokens += gateUsage.InputTokens
-			gateUsageTotal.OutputTokens += gateUsage.OutputTokens
-			gate = &gateTrace{SharedIDs: candidateKeys(res.Shared), KeptIDs: candidateKeys(res.Kept), Err: res.Err}
-			if res.Err != "" {
-				log.Printf("assistant: share gate failed closed: %s", res.Err)
-			}
-			retrieved = res.Shared
-			touchFacts(ctx, r.store, res.Shared)
-		}
+		retrieved, gate, gateUsage = r.roomGate(ctx, req.Character, req.Listeners, req.Input, modelName, set, retrieved)
 	}
 	cctx := BuildContext(ContextInput{
 		Character: req.Character, Memory: memory, History: history, Summary: conv.Summary,
@@ -369,8 +325,8 @@ func (r *Runner) Turn(ctx context.Context, req TurnRequest, emit func(Event)) (R
 
 	var usage llm.Usage
 	var lastText string // the last words actually spoken (for errors and the cap)
-	usage.InputTokens += gateUsageTotal.InputTokens
-	usage.OutputTokens += gateUsageTotal.OutputTokens
+	usage.InputTokens += gateUsage.InputTokens
+	usage.OutputTokens += gateUsage.OutputTokens
 	webRead := false // a page or search result may carry planted instructions
 	for step := 0; step < r.maxSteps; step++ {
 		var partial strings.Builder

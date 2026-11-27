@@ -58,7 +58,7 @@ func (s *Store) CreateRoom(ctx context.Context, name string, members []string) (
 		return Room{}, errors.New("room: could not allocate an id")
 	}
 
-	participants := append(append([]string(nil), members...), "me")
+	participants := append(append([]string(nil), members...), UserSpeaker)
 	for _, p := range participants {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO conversations (id, character_id, room_id) VALUES ($1, $2, $3)`,

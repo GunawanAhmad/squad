@@ -1,5 +1,7 @@
 // Shapes of the Go API (handlers.go).
 export type PortraitState = 'idle' | 'thinking' | 'talking';
+// The speaker id for the user in rooms and fact provenance.
+export const USER_SPEAKER = 'me';
 export interface Character {
   id: string; name: string; model: string; models: string[] | null;
   discretion: number; // 0-10, how much the character shares about you in a room

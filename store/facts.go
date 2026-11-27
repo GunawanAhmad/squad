@@ -51,6 +51,15 @@ func (f Fact) Provenance() string {
 	return strings.Join(parts, ", ")
 }
 
+// ProvenanceNote is Provenance wrapped for a prompt line, or "" when the fact
+// is plain user knowledge.
+func (f Fact) ProvenanceNote() string {
+	if p := f.Provenance(); p != "" {
+		return " (" + p + ")"
+	}
+	return ""
+}
+
 // FactFilter narrows Facts. Zero values mean "no restriction".
 type FactFilter struct {
 	Status   []string
@@ -102,7 +111,7 @@ func (s *Store) AddFact(ctx context.Context, f Fact) (Fact, error) {
 		f.SourceKind = "user"
 	}
 	if f.About == "" {
-		f.About = "me"
+		f.About = UserSpeaker
 	}
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO facts (character_id, text, category, core, status, source_kind, source_message_id, valid_from, about, told_by)
@@ -561,6 +570,17 @@ func (s *Store) ApplyFactOps(ctx context.Context, characterID string, day time.T
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	insert := func(op FactOp, category string) (int64, error) {
+		var id int64
+		err := tx.QueryRow(ctx, `
+			INSERT INTO facts (character_id, text, category, core, source_kind, valid_from, source_message_id, about, told_by)
+			VALUES ($1, $2, $3, $4, 'extraction', $5, $6, COALESCE(NULLIF($7, ''), 'me'), $8)
+			RETURNING id`,
+			characterID, strings.TrimSpace(op.Text), category, op.Core, Day(day), op.SourceMessageID,
+			op.About, nullIfEmpty(op.ToldBy)).Scan(&id)
+		return id, err
+	}
+
 	applied := 0
 	for _, op := range ops {
 		category := op.Category
@@ -569,23 +589,12 @@ func (s *Store) ApplyFactOps(ctx context.Context, characterID string, day time.T
 		}
 		switch op.Op {
 		case "ADD":
-			_, err := tx.Exec(ctx, `
-				INSERT INTO facts (character_id, text, category, core, source_kind, valid_from, source_message_id, about, told_by)
-				VALUES ($1, $2, $3, $4, 'extraction', $5, $6, COALESCE(NULLIF($7, ''), 'me'), $8)`,
-				characterID, strings.TrimSpace(op.Text), category, op.Core, Day(day), op.SourceMessageID,
-				op.About, nullIfEmpty(op.ToldBy))
-			if err != nil {
+			if _, err := insert(op, category); err != nil {
 				return applied, err
 			}
 			applied++
 		case "SUPERSEDE":
-			var newID int64
-			err := tx.QueryRow(ctx, `
-				INSERT INTO facts (character_id, text, category, core, source_kind, valid_from, source_message_id, about, told_by)
-				VALUES ($1, $2, $3, $4, 'extraction', $5, $6, COALESCE(NULLIF($7, ''), 'me'), $8)
-				RETURNING id`,
-				characterID, strings.TrimSpace(op.Text), category, op.Core, Day(day), op.SourceMessageID,
-				op.About, nullIfEmpty(op.ToldBy)).Scan(&newID)
+			newID, err := insert(op, category)
 			if err != nil {
 				return applied, err
 			}
