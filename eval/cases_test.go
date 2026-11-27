@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"squad/assistant"
 	"squad/llm"
 )
 
@@ -55,5 +56,30 @@ func TestGroundingJudgeRejectsWrongNumbersAndUncitedItems(t *testing.T) {
 	}
 	if ok, _ := judgeGroundingAnswer(c, tool, seed, "Focus on finish the report."); !ok {
 		t.Fatal("prose citation rejected")
+	}
+}
+
+func TestJudgeGateUsesDiscretionBands(t *testing.T) {
+	f := func(ids ...int64) []assistant.Retrieved {
+		var out []assistant.Retrieved
+		for _, id := range ids {
+			out = append(out, assistant.Retrieved{Kind: "fact", ID: id})
+		}
+		return out
+	}
+	if ok, why := judgeGate(f(1, 2, 3), f(1)); !ok {
+		t.Fatalf("quiet gate rejected: %s", why)
+	}
+	if ok, _ := judgeGate(f(1, 2, 3), f(4)); ok {
+		t.Fatal("sensitive fact at discretion 9 accepted")
+	}
+	if ok, _ := judgeGate(f(1, 2, 3), f(1, 2, 3)); ok {
+		t.Fatal("discretion 9 sharing as much as discretion 2 accepted")
+	}
+	if ok, _ := judgeGate(f(1, 2), f(1)); ok {
+		t.Fatal("discretion 2 sharing fewer than three facts accepted")
+	}
+	if ok, _ := judgeGate(f(1, 2, 3), f(1, 2, 3, 4)); ok {
+		t.Fatal("sensitive fact among many accepted")
 	}
 }

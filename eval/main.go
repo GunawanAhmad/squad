@@ -172,6 +172,14 @@ func main() {
 				printPassResult(model, "grounding", res)
 			}
 		}
+		if contains(cfg.sets, "gate") {
+			res, err := runGateSet(client, model, cfg.runs)
+			if err != nil {
+				fmt.Printf("gate: %v\n", err)
+			} else {
+				printPassResult(model, "share gate", res)
+			}
+		}
 	}
 }
 
@@ -183,6 +191,7 @@ func printEstimate(cfg config) {
 	memoryCalls := len(memoryCases) * cfg.runs * 4
 	langCalls := len(crossLanguageCases) * cfg.runs * 4
 	groundingCalls := len(groundingCases) * cfg.runs * 2
+	gateCalls := cfg.runs * 2 // one low and one high discretion call per run
 	perModel := 0
 	models := cfg.models
 	if len(models) == 0 {
@@ -206,6 +215,9 @@ func printEstimate(cfg config) {
 	if contains(cfg.sets, "grounding") {
 		perModel += groundingCalls
 	}
+	if contains(cfg.sets, "gate") {
+		perModel += gateCalls
+	}
 	fmt.Println("Eval plan (no calls made):")
 	fmt.Printf("  tool calls: %d cases x %d runs = %d calls\n", len(toolCases), cfg.runs, toolCalls)
 	fmt.Printf("  time queries: %d cases x %d runs x ~3 = %d calls\n", len(timeCases), cfg.runs, timeCalls)
@@ -213,6 +225,7 @@ func printEstimate(cfg config) {
 	fmt.Printf("  memory: %d cases x %d runs x ~4 = %d calls\n", len(memoryCases), cfg.runs, memoryCalls)
 	fmt.Printf("  cross-language: %d cases x %d runs x ~4 = %d calls\n", len(crossLanguageCases), cfg.runs, langCalls)
 	fmt.Printf("  grounding: %d cases x %d runs x ~2 (tool + answer) = %d calls\n", len(groundingCases), cfg.runs, groundingCalls)
+	fmt.Printf("  share gate: %d runs x 2 (low + high discretion) = %d calls\n", cfg.runs, gateCalls)
 	fmt.Printf("  per model: ~%d calls\n", perModel)
 	fmt.Printf("  models (%d): %s\n", len(models), strings.Join(models, ", "))
 	if cfg.hybrid {

@@ -1,6 +1,6 @@
 # Rooms
 
-Status: design, agreed 2026-11-27. Not built yet. Plan:
+Status: built 2026-11-27. Plan:
 `docs/superpowers/plans/2026-11-27-rooms.md`.
 
 ## The idea
@@ -54,3 +54,22 @@ part of this work.
    or a character id. `told_by` is the character that said it, or empty
    when it came from you. The server takes `told_by` from the source
    message's speaker and never trusts the model for it.
+
+## Verified
+
+`make test` covers the room store, turn-taking, fan-out, the gate, the API and
+the close job over a room day. Two checks used real models:
+
+- **Manual UI check:** created a room with Socrates and Ria, sent
+  `@Ria ask Socrates what he thinks of me`, and saw Ria hand the turn to
+  Socrates with `@Socrates` and Socrates hand it back with `@Ria` (three
+  bubbles, then the chain ended). Reloading the room showed the same
+  transcript.
+- **Share-gate eval** (`make eval sets=gate models=… runs=2`): the fixed six
+  candidates, low vs high discretion. Pass rate:
+
+  | Model | Pass |
+  |---|---|
+  | `deepseek-v4.1-flash` | 2/2 |
+  | `claude-haiku-5-5` | 2/2 |
+  | `deepseek-v4-pro` | 2/2 |

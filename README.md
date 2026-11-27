@@ -74,7 +74,9 @@ Every character has its own memory, made of four parts:
 - **Facts**: short notes about you ("works night shifts", "moving to Jakarta in
   March"). A character saves them with `remember`, and the nightly close job
   adds them too (see the next section). Facts marked *core* go into every
-  prompt, up to about 2,000 characters. The rest are found by search.
+  prompt, up to about 2,000 characters. The rest are found by search. Each fact
+  also records who it is *about* (`me` or a character id) and who said it
+  (`told_by`, taken from the source message's speaker, never from the model).
 - **Pre-retrieval**: before each turn, the server searches the character's own
   past messages and facts using your message, and puts a few quoted hits in front
   of the model (at most 4 messages and 3 facts).
@@ -99,6 +101,33 @@ is worth keeping. New facts are added, outdated ones are superseded, and every
 change points back to the message it came from. The server checks all of this in
 Go: a character can only change its own facts, quoting its own messages. If one
 character's close fails, it retries alone on a later pass, up to 3 times.
+
+### Rooms
+
+A room is a group conversation: you and at least two characters. Everyone in it
+hears your messages and the other characters' final replies, never their tool
+calls or web reads. Each member keeps its own copy of the room in the store, so
+per-character search, forget and "what does this character know" keep working
+unchanged; your copy (`me`) is the transcript the UI shows.
+
+- **Who answers.** The member you @mention, by id or name, case-insensitive.
+  With no mention, the last character who spoke in the room answers; in a new
+  room, the first member. A reply that @mentions another member hands the turn
+  to them; a reply with no mention (or only itself) ends the chain. At most 4
+  character turns per message you send.
+- **Discretion.** Every character has a `discretion` from 0 to 10 (default 5).
+  Before each room turn a separate **share gate** decides which of that
+  character's facts it is willing to bring up in front of these members.
+  0–3 shares freely unless something is obviously private; 4–7 keeps health,
+  money, relationships and confidences; 8–10 does not repeat what you told it
+  and points the asker to you. Only approved facts enter the prompt, and if the
+  gate fails nothing is shared. `profile.md` is not gated: you wrote it for
+  everyone. There is no `recall` in rooms (it would bypass the gate);
+  `remember` and `forget` still work.
+- **API.** `POST /api/rooms` with `{name, members}`, `GET /api/rooms`,
+  `GET /api/rooms/{id}/messages` (the transcript, each row with a `speaker`),
+  and `POST /api/rooms/{id}/messages` with `{content}`, which streams NDJSON
+  `speaker`/`text`/`tool`/`error` events and then `done`.
 
 ### The Assistant's day
 
@@ -165,6 +194,7 @@ Add an entry to `characters.json`:
   "provider": "",                // "" for OpenCode, "claude" for the CLI
   "tools": ["web_search", "fetch_url", "remember", "forget", "recall"],
   "context": "memory",           // or "none"
+  "discretion": 5,                // 0-10: how much it shares about you in rooms
   "ui": { "tagline": "…", "description": "…", "accentColor": "#e8734a",
           "selectLine": "…", "stats": [...], "voice": {...},
           "portrait": { "idle": "/characters/chef/portrait.png", ... } }
@@ -186,8 +216,8 @@ Don't rename an `id` later: its chats and facts stay under the old one.
 | `llm/` | Model adapters: OpenCode, `claude` CLI, embeddings, and a fake model for tests. |
 | `tools/` | The tool registry and every tool. |
 | `store/` | Postgres access and numbered migrations (`store/migrations/`). |
-| `eval/` | Model evals for tool use and memory. These spend real API credit. |
-| `frontend/` | Vue app: character home, chat with a character rail, and the Memory screen. It builds into `web/`, which the binary embeds. |
+| `eval/` | Model evals for tool use, memory, grounding and the room share gate. These spend real API credit. |
+| `frontend/` | Vue app: character home, rooms, chat with a character rail, and the Memory screen. It builds into `web/`, which the binary embeds. |
 | `docs/` | `assistant-roadmap.md` (design decisions and what was verified), `memory-research.md`. |
 
 ## Tests and evals
@@ -198,7 +228,8 @@ schema in the Compose Postgres; when Postgres isn't reachable they skip with a
 message instead of failing. Don't run `go test ./...`: `frontend/node_modules`
 contains stray Go packages, so the Makefile filters them out.
 
-`make eval models=… runs=…` scores real models on tool use and memory recall,
+`make eval models=… runs=…` scores real models on tool use, memory recall,
+grounding and the share gate (`sets=gate`),
 and spends API credit. `go run ./eval -dry-run -models=…` prints the call
 estimate first.
 
