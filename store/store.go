@@ -84,11 +84,14 @@ type Message struct {
 	ConversationID string
 	Role           string // user | assistant | tool | trigger
 	Content        string
-	ToolCalls      []byte // jsonb
-	ToolCallID     string
-	RunID          *int64
-	CreatedAt      time.Time
-	ForgottenAt    *time.Time
+	// Speaker is who said it in a room: a character id, "me" for the user,
+	// or "" in a 1:1 chat (the conversation's owner, or the user).
+	Speaker     string
+	ToolCalls   []byte // jsonb
+	ToolCallID  string
+	RunID       *int64
+	CreatedAt   time.Time
+	ForgottenAt *time.Time
 }
 
 type Run struct {
@@ -171,10 +174,10 @@ func scanConversation(row pgx.Row) (Conversation, error) {
 
 func (s *Store) AddMessage(ctx context.Context, m Message) (Message, error) {
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO messages (conversation_id, role, content, tool_calls, tool_call_id, run_id)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO messages (conversation_id, role, content, speaker, tool_calls, tool_call_id, run_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at`,
-		m.ConversationID, m.Role, m.Content, m.ToolCalls, nullIfEmpty(m.ToolCallID), m.RunID)
+		m.ConversationID, m.Role, m.Content, nullIfEmpty(m.Speaker), m.ToolCalls, nullIfEmpty(m.ToolCallID), m.RunID)
 	err := row.Scan(&m.ID, &m.CreatedAt)
 	if err != nil {
 		return Message{}, err
@@ -187,7 +190,7 @@ func (s *Store) AddMessage(ctx context.Context, m Message) (Message, error) {
 // returns the newest page (so a long chat opens at the present, not the past);
 // with after>0 it returns the next page after that id. limit <= 0 means all.
 func (s *Store) Messages(ctx context.Context, conversationID string, after int64, limit int) ([]Message, error) {
-	const cols = `id, conversation_id, role, content, COALESCE(tool_calls, 'null'::jsonb),
+	const cols = `id, conversation_id, role, content, COALESCE(speaker, ''), COALESCE(tool_calls, 'null'::jsonb),
 		COALESCE(tool_call_id, ''), run_id, created_at, forgotten_at`
 
 	var rows pgx.Rows
@@ -195,7 +198,7 @@ func (s *Store) Messages(ctx context.Context, conversationID string, after int64
 	if after == 0 && limit > 0 {
 		rows, err = s.pool.Query(ctx, `
 			SELECT * FROM (
-				SELECT id, conversation_id, role, content,
+				SELECT id, conversation_id, role, content, COALESCE(speaker, '') AS speaker,
 				       COALESCE(tool_calls, 'null'::jsonb) AS tool_calls,
 				       COALESCE(tool_call_id, '') AS tool_call_id,
 				       run_id, created_at, forgotten_at
@@ -219,10 +222,10 @@ func (s *Store) Messages(ctx context.Context, conversationID string, after int64
 // and tests; the app itself always uses AddMessage.
 func (s *Store) AddMessageAt(ctx context.Context, m Message, at time.Time) (Message, error) {
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO messages (conversation_id, role, content, tool_calls, tool_call_id, run_id, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO messages (conversation_id, role, content, speaker, tool_calls, tool_call_id, run_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, created_at`,
-		m.ConversationID, m.Role, m.Content, m.ToolCalls, nullIfEmpty(m.ToolCallID), m.RunID, at)
+		m.ConversationID, m.Role, m.Content, nullIfEmpty(m.Speaker), m.ToolCalls, nullIfEmpty(m.ToolCallID), m.RunID, at)
 	if err := row.Scan(&m.ID, &m.CreatedAt); err != nil {
 		return Message{}, err
 	}
@@ -238,11 +241,11 @@ func (s *Store) GetMessage(ctx context.Context, characterID string, id int64) (M
 	}
 	var m Message
 	err := s.pool.QueryRow(ctx, `
-		SELECT m.id, m.conversation_id, m.role, m.content, COALESCE(m.tool_calls, 'null'::jsonb),
+		SELECT m.id, m.conversation_id, m.role, m.content, COALESCE(m.speaker, ''), COALESCE(m.tool_calls, 'null'::jsonb),
 		       COALESCE(m.tool_call_id, ''), m.run_id, m.created_at, m.forgotten_at
 		FROM messages m JOIN conversations c ON c.id = m.conversation_id
 		WHERE m.id = $1 AND c.character_id = $2`, id, characterID).
-		Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &m.ToolCalls,
+		Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &m.Speaker, &m.ToolCalls,
 			&m.ToolCallID, &m.RunID, &m.CreatedAt, &m.ForgottenAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Message{}, ErrNotFound
@@ -254,7 +257,7 @@ func (s *Store) GetMessage(ctx context.Context, characterID string, id int64) (M
 func (s *Store) RecentMessages(ctx context.Context, conversationID string, n int) ([]Message, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT * FROM (
-			SELECT id, conversation_id, role, content, COALESCE(tool_calls, 'null'::jsonb),
+			SELECT id, conversation_id, role, content, COALESCE(speaker, ''), COALESCE(tool_calls, 'null'::jsonb),
 			       COALESCE(tool_call_id, ''), run_id, created_at, forgotten_at
 			FROM messages WHERE conversation_id = $1 AND forgotten_at IS NULL
 			ORDER BY id DESC LIMIT $2
@@ -270,7 +273,7 @@ func scanMessages(rows pgx.Rows) ([]Message, error) {
 	var out []Message
 	for rows.Next() {
 		var m Message
-		err := rows.Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &m.ToolCalls,
+		err := rows.Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &m.Speaker, &m.ToolCalls,
 			&m.ToolCallID, &m.RunID, &m.CreatedAt, &m.ForgottenAt)
 		if err != nil {
 			return nil, err
@@ -362,7 +365,7 @@ func nullIfEmpty(s string) *string {
 func (s *Store) RecentMessagesAfter(ctx context.Context, conversationID string, after int64, n int) ([]Message, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT * FROM (
-			SELECT id, conversation_id, role, content, COALESCE(tool_calls, 'null'::jsonb),
+			SELECT id, conversation_id, role, content, COALESCE(speaker, ''), COALESCE(tool_calls, 'null'::jsonb),
 			       COALESCE(tool_call_id, ''), run_id, created_at, forgotten_at
 			FROM messages WHERE conversation_id = $1 AND id > $2 AND forgotten_at IS NULL
 			ORDER BY id DESC LIMIT $3

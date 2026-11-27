@@ -22,13 +22,17 @@ type Fact struct {
 	Status          string // active | superseded | forgotten
 	SourceKind      string // user | tool | extraction
 	SourceMessageID *int64
-	SupersededBy    *int64
-	ValidFrom       time.Time // date
-	ValidTo         *time.Time
-	LastUsedAt      *time.Time
-	UseCount        int
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// About is "me" or a character id: who the fact is about.
+	About string
+	// ToldBy is the character that said it ("" when it came from the user).
+	ToldBy       string
+	SupersededBy *int64
+	ValidFrom    time.Time // date
+	ValidTo      *time.Time
+	LastUsedAt   *time.Time
+	UseCount     int
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // FactFilter narrows Facts. Zero values mean "no restriction".
@@ -53,12 +57,13 @@ func ValidFactCategory(category string) bool {
 }
 
 const factCols = `id, character_id, text, category, core, status, source_kind, source_message_id, superseded_by,
-	valid_from, valid_to, last_used_at, use_count, created_at, updated_at`
+	valid_from, valid_to, last_used_at, use_count, created_at, updated_at, about, COALESCE(told_by, '')`
 
 func scanFact(row pgx.Row) (Fact, error) {
 	var f Fact
 	err := row.Scan(&f.ID, &f.CharacterID, &f.Text, &f.Category, &f.Core, &f.Status, &f.SourceKind, &f.SourceMessageID,
-		&f.SupersededBy, &f.ValidFrom, &f.ValidTo, &f.LastUsedAt, &f.UseCount, &f.CreatedAt, &f.UpdatedAt)
+		&f.SupersededBy, &f.ValidFrom, &f.ValidTo, &f.LastUsedAt, &f.UseCount, &f.CreatedAt, &f.UpdatedAt,
+		&f.About, &f.ToldBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Fact{}, ErrNotFound
 	}
@@ -80,11 +85,15 @@ func (s *Store) AddFact(ctx context.Context, f Fact) (Fact, error) {
 	if f.SourceKind == "" {
 		f.SourceKind = "user"
 	}
+	if f.About == "" {
+		f.About = "me"
+	}
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO facts (character_id, text, category, core, status, source_kind, source_message_id, valid_from)
-		VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, ''), 'active'), $6, $7, $8)
+		INSERT INTO facts (character_id, text, category, core, status, source_kind, source_message_id, valid_from, about, told_by)
+		VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, ''), 'active'), $6, $7, $8, $9, $10)
 		RETURNING `+factCols,
-		f.CharacterID, strings.TrimSpace(f.Text), f.Category, f.Core, f.Status, f.SourceKind, f.SourceMessageID, Day(f.ValidFrom))
+		f.CharacterID, strings.TrimSpace(f.Text), f.Category, f.Core, f.Status, f.SourceKind, f.SourceMessageID, Day(f.ValidFrom),
+		f.About, nullIfEmpty(f.ToldBy))
 	return scanFact(row)
 }
 
@@ -517,6 +526,8 @@ type FactOp struct {
 	Text            string
 	Category        string
 	Core            bool
+	About           string // "" means me
+	ToldBy          string // set by the server from the source message's speaker
 	SourceMessageID *int64 // the message the day-close job extracted it from
 }
 
@@ -543,9 +554,10 @@ func (s *Store) ApplyFactOps(ctx context.Context, characterID string, day time.T
 		switch op.Op {
 		case "ADD":
 			_, err := tx.Exec(ctx, `
-				INSERT INTO facts (character_id, text, category, core, source_kind, valid_from, source_message_id)
-				VALUES ($1, $2, $3, $4, 'extraction', $5, $6)`,
-				characterID, strings.TrimSpace(op.Text), category, op.Core, Day(day), op.SourceMessageID)
+				INSERT INTO facts (character_id, text, category, core, source_kind, valid_from, source_message_id, about, told_by)
+				VALUES ($1, $2, $3, $4, 'extraction', $5, $6, COALESCE(NULLIF($7, ''), 'me'), $8)`,
+				characterID, strings.TrimSpace(op.Text), category, op.Core, Day(day), op.SourceMessageID,
+				op.About, nullIfEmpty(op.ToldBy))
 			if err != nil {
 				return applied, err
 			}
@@ -553,10 +565,11 @@ func (s *Store) ApplyFactOps(ctx context.Context, characterID string, day time.T
 		case "SUPERSEDE":
 			var newID int64
 			err := tx.QueryRow(ctx, `
-				INSERT INTO facts (character_id, text, category, core, source_kind, valid_from, source_message_id)
-				VALUES ($1, $2, $3, $4, 'extraction', $5, $6)
+				INSERT INTO facts (character_id, text, category, core, source_kind, valid_from, source_message_id, about, told_by)
+				VALUES ($1, $2, $3, $4, 'extraction', $5, $6, COALESCE(NULLIF($7, ''), 'me'), $8)
 				RETURNING id`,
-				characterID, strings.TrimSpace(op.Text), category, op.Core, Day(day), op.SourceMessageID).Scan(&newID)
+				characterID, strings.TrimSpace(op.Text), category, op.Core, Day(day), op.SourceMessageID,
+				op.About, nullIfEmpty(op.ToldBy)).Scan(&newID)
 			if err != nil {
 				return applied, err
 			}
@@ -585,6 +598,7 @@ type DayMessage struct {
 	CharacterID string
 	Role        string
 	Content     string
+	Speaker     string // "" when it came from the user in a 1:1 chat
 	CreatedAt   time.Time
 }
 
@@ -597,7 +611,7 @@ func (s *Store) DayMessages(ctx context.Context, characterID string, day time.Ti
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT m.id, c.character_id, m.role, m.content, m.created_at
+		SELECT m.id, c.character_id, m.role, m.content, COALESCE(m.speaker, ''), m.created_at
 		FROM messages m JOIN conversations c ON c.id = m.conversation_id
 		WHERE m.forgotten_at IS NULL AND m.role IN ('user','assistant') AND c.character_id = $4
 		  AND ((c.day = $1) OR (c.day IS NULL AND m.created_at >= $2 AND m.created_at < $3))
@@ -609,7 +623,7 @@ func (s *Store) DayMessages(ctx context.Context, characterID string, day time.Ti
 	var out []DayMessage
 	for rows.Next() {
 		var m DayMessage
-		if err := rows.Scan(&m.ID, &m.CharacterID, &m.Role, &m.Content, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.CharacterID, &m.Role, &m.Content, &m.Speaker, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
